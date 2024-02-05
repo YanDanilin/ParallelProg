@@ -1,0 +1,17 @@
+syntax="proto3";
+
+package protobuf;
+
+option go_package="github.com/YanDanilin/ParallelProg/protobuf";
+
+message RequestFromClient {
+    repeated int32 array = 1;
+}
+
+message ResponseToClient {
+    sint64 sum = 1;
+}
+
+service Operator {
+    rpc ProcessRequest (RequestFromClient) returns (RequestFromClient) {}
+}
