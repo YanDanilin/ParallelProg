@@ -1,0 +1,7 @@
+{
+    "Username": "yan",
+    "Password": "yan",
+    "Host": "localhost",
+    "Port": 50051,
+    "MaxRequest": 1000
+}
