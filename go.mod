@@ -1,4 +1,4 @@
-module gitlab.com/YanDanilin/ParallelProg
+module github.com/YanDanilin/ParallelProg
 
 go 1.18
 
