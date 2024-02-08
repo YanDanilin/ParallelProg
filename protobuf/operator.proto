@@ -13,5 +13,5 @@ message ResponseToClient {
 }
 
 service Operator {
-    rpc ProcessRequest (RequestFromClient) returns (RequestFromClient) {}
+    rpc ProcessRequest (RequestFromClient) returns (ResponseToClient) {}
 }

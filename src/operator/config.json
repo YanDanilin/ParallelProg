@@ -1,8 +1,5 @@
 {
-    "Username": "guest",
-    "Password": "guest",
     "Host": "localhost",
-    "Port": 5672,
-    "TaskQueue": "tasks",
-    "ReaponseQueue": "responses"
+    "Port": "50051",
+    "ListenWorkersOn": "9090"
 }

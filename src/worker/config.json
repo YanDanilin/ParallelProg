@@ -1,7 +1,5 @@
 {
-    "Username": "yan",
-    "Password": "yan",
-    "Host": "localhost",
-    "Port": 50051,
-    "MaxRequest": 1000
+    "OperatorHost": "localhost",
+    "OperatorPort": "9090",
+    "ListenOperatorOn": "8001"
 }

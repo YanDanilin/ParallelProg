@@ -2,49 +2,70 @@ package main
 
 import (
 	"encoding/json"
-	"io"  // чтение файлов и вывод
-	"log" // log.Fatalf
-	"os"  // открытие фалов
-	//"time" чтобы спать
+	"flag"
 	"fmt"
+	"net"
+	"time"
+
+	// "os"
+	// "strings"
+	"log"
+
+	"github.com/YanDanilin/ParallelProg/utils"
 )
 
-const constConfigFilePath string = "./config.json"
+var configFilePathFlag = flag.String("configPath", "./src/worker/config.json", "path to configuration file for worker")
+var roleFlag = flag.String("role", "worker", "set role of worker ['worker' | 'manager']")
 
-type ConfigWorkerJSON struct {
-	Username   string
-	Password   string
-	Host       string
-	Port       uint16
-	MaxRequest uint32
+type ConfigWorker struct {
+	OperatorHost     string // worker will connect these host and port to send a request to connect ot server
+	OperatorPort     string
+	Host             string // where the worker works (figures out in main function)
+	ListenOperatorOn string // worker will get info from operator on this port
+	ListenManagerOn  string // worker will get tasks from manager on this port
+	ManagerPort      string // worker will send response to the manager on this port
+	IsManager        bool
 }
 
-func handleError(err error, msg string) {
-	if err != nil {
-		log.Fatalf("error: %s\tmsg: %s", err, msg)
-	}
+type ConfigStruct struct {
+	ConfigWorker
 }
-
 
 func main() {
-	configFilePath := constConfigFilePath
-	if (len(os.Args) > 1) {
-		configFilePath = os.Args[1]
-	}
-	// reading config.json
-	file, err := os.Open(configFilePath)
-	if err != nil {
-		panic("Failed to open file")
-	}
-	defer file.Close()
-	var configData ConfigWorkerJSON = ConfigWorkerJSON{}
-	dataFromFile, err := io.ReadAll(file) // dataFromfile has type of []byte
-	handleError(err, "Failed to read from file")
-	if !json.Valid(dataFromFile) {
-		handleError(nil, "Wrong json format")
-	}
-	jsonErr := json.Unmarshal(dataFromFile, &configData)
-	handleError(jsonErr, "Failed to decode json file")
+	flag.Parse()
+	var configData ConfigStruct
+	err := utils.DecodeConfigJSON(*configFilePathFlag, &configData)
+	utils.HandleError(err, "Failed to get config parametrs")
 
-	fmt.Println(configData)
+	if *roleFlag == "manager" {
+		configData.IsManager = true
+	}
+
+	operatorListener, err := net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
+	utils.HandleError(err, "Failed to listen port "+configData.ListenOperatorOn)
+	defer operatorListener.Close()
+	var conn net.Conn
+	for {
+		conn, err = net.Dial("tcp", configData.OperatorHost+":"+configData.OperatorPort)
+		if err != nil {
+			log.Println("Failed to connect. Trying again")
+			time.Sleep(time.Second * 5)
+		} else {
+			break
+		}
+	}
+	defer conn.Close()
+	fmt.Println("Connect to operator!")
+
+	message, err := json.Marshal(configData)
+	_, err = conn.Write(message)
+	utils.HandleError(err, "Failed to send message")
+
+	connToOp, err := operatorListener.Accept()
+	if err != nil {
+		fmt.Println("Failed to read response from operator")
+	}
+	buffer := make([]byte, 1024)
+	bytesRead, err := connToOp.Read(buffer)
+	fmt.Println(string(buffer[:bytesRead]))
 }

@@ -26,7 +26,7 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 type OperatorClient interface {
-	ProcessRequest(ctx context.Context, in *RequestFromClient, opts ...grpc.CallOption) (*RequestFromClient, error)
+	ProcessRequest(ctx context.Context, in *RequestFromClient, opts ...grpc.CallOption) (*ResponseToClient, error)
 }
 
 type operatorClient struct {
@@ -37,8 +37,8 @@ func NewOperatorClient(cc grpc.ClientConnInterface) OperatorClient {
 	return &operatorClient{cc}
 }
 
-func (c *operatorClient) ProcessRequest(ctx context.Context, in *RequestFromClient, opts ...grpc.CallOption) (*RequestFromClient, error) {
-	out := new(RequestFromClient)
+func (c *operatorClient) ProcessRequest(ctx context.Context, in *RequestFromClient, opts ...grpc.CallOption) (*ResponseToClient, error) {
+	out := new(ResponseToClient)
 	err := c.cc.Invoke(ctx, Operator_ProcessRequest_FullMethodName, in, out, opts...)
 	if err != nil {
 		return nil, err
@@ -50,7 +50,7 @@ func (c *operatorClient) ProcessRequest(ctx context.Context, in *RequestFromClie
 // All implementations must embed UnimplementedOperatorServer
 // for forward compatibility
 type OperatorServer interface {
-	ProcessRequest(context.Context, *RequestFromClient) (*RequestFromClient, error)
+	ProcessRequest(context.Context, *RequestFromClient) (*ResponseToClient, error)
 	mustEmbedUnimplementedOperatorServer()
 }
 
@@ -58,7 +58,7 @@ type OperatorServer interface {
 type UnimplementedOperatorServer struct {
 }
 
-func (UnimplementedOperatorServer) ProcessRequest(context.Context, *RequestFromClient) (*RequestFromClient, error) {
+func (UnimplementedOperatorServer) ProcessRequest(context.Context, *RequestFromClient) (*ResponseToClient, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method ProcessRequest not implemented")
 }
 func (UnimplementedOperatorServer) mustEmbedUnimplementedOperatorServer() {}
