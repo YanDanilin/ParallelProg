@@ -12,6 +12,6 @@ message RequestToConnect {
 
 message Task {
     bool Ack = 1;
-    string Array = 2;
+    repeated int32 Array = 2;
     bool InProcess = 3;
 }

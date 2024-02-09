@@ -64,14 +64,17 @@ func main() {
 		}
 		array, err := readArray(input)
 		if err != nil {
-			log.Println("FAiled to read inputed data")
+			log.Println("Failed to read inputed data")
 			continue
 		}
 		fmt.Println(array)
 		response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
 
 		if err != nil {
-			fmt.Printf("Error: %v", err)
+			log.Println("Connection to operator lost")
+			log.Printf("Error: %v", err)
+
+			fmt.Println("Try again?")
 		} else {
 			fmt.Println(response)
 		}
