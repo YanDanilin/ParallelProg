@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"flag"
 	"fmt"
 	"net"
@@ -12,11 +11,10 @@ import (
 
 	// "os"
 	"log"
-	"strings"
 
+	cmpb "github.com/YanDanilin/ParallelProg/communication"
 	"github.com/YanDanilin/ParallelProg/utils"
 	"github.com/google/uuid"
-	cmpb "github.com/YanDanilin/ParallelProg/communication"
 
 	"google.golang.org/protobuf/proto"
 )
@@ -27,20 +25,25 @@ var roleFlag = flag.String("role", "worker", "set role of worker ['worker' | 'ma
 type WorkerID uuid.UUID
 
 type ConfigWorker struct {
-	ID               WorkerID // unique id of worker made by operator
-	OperatorHost     string   // worker will connect these host and port to send a request to connect ot server
+	// ID               WorkerID // unique id of worker made by operator
+	OperatorHost     string // worker will connect these host and port to send a request to connect ot server
 	OperatorPort     string
-	Host             string // where the worker works (figures out in main function)
+	Host             string // where the worker works
 	ListenOperatorOn string // worker will get info from operator on this port
-	// ListenManagerOn  string // worker will get tasks from manager on this port
-	ManagerHost string
-	ManagerPort      string // worker will send response to the manager on this port
-	IsManager        bool
-	IsBusy           bool
+	ListenOn         string // worker gets tasks from manager on this port
+	//ManagerHost      string
+	//ManagerPort      string // worker dials and sends responses to the manager on this port
+	IsManager bool // if true, ManagerPort is where manager gets responses and ListenManagerOn is where to send tasks
 }
 
 type ConfigStruct struct {
 	ConfigWorker
+}
+
+type Worker struct {
+	Config      ConfigWorker
+	ManagerHost string
+	ManagerPort string // worker dials and sends responses to the manager on this port
 }
 
 func main() {
@@ -56,8 +59,13 @@ func main() {
 	operatorListener, err := net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
 	utils.HandleError(err, "Failed to listen port "+configData.ListenOperatorOn)
 	defer operatorListener.Close()
-	message, err := json.Marshal(configData)
+	message, err := proto.Marshal(&cmpb.RequestToConnect{
+		ListenOperatorOn: configData.ListenOperatorOn,
+		IsManager:        configData.IsManager,
+		ListenOn:         configData.ListenOn,
+	})
 	var conn net.Conn
+	var worker Worker = Worker{}
 	for {
 		conn, err = net.Dial("tcp", configData.OperatorHost+":"+configData.OperatorPort)
 		if err != nil {
@@ -65,10 +73,7 @@ func main() {
 			time.Sleep(time.Second * 5)
 			conn, err = net.Dial("tcp", configData.OperatorHost+":"+configData.OperatorPort)
 			utils.HandleError(err, "Failed to connect after waiting")
-		} // } else {
-		// 	break
-		// }
-		// }
+		}
 
 		fmt.Println("Connected to operator!")
 
@@ -81,18 +86,24 @@ func main() {
 		}
 		buffer := make([]byte, 1024)
 		bytesRead, err := connToOper.Read(buffer)
-		utils.HandleError(err, "here")
-		fmt.Println(string(buffer[:bytesRead]))
-		if string(buffer[:6]) == "[WAIT]" {
+		utils.HandleError(err, "Failed to read reply from operator")
+		var reply cmpb.ReplyToConnect
+		err = proto.Unmarshal(buffer[:bytesRead], &reply)
+		if reply.Type == "[WAIT]" {
+			fmt.Println(reply.Msg)
 			time.Sleep(time.Second * 2)
-			fmt.Println(string(buffer[7:bytesRead]))
 			conn.Close()
 			continue
-		}
-		if string(buffer[:6]) == "[INFO]" {
-			configData.ManagerHost = strings.Split(string(buffer[7:]), ":")[0]
-			configData.ManagerPort = strings.Split(string(buffer[7:]), ":")[1]
+		} else if reply.Type == "[INFO]" {
+			worker.ManagerHost = reply.ManagerHost
+			worker.ManagerPort = reply.ManagerPort
+			if configData.IsManager && !reply.IsManager {
+				log.Println(reply.Msg)
+			}
+			configData.IsManager = reply.IsManager
 			break
+		} else {
+			log.Println(reply.Msg)
 		}
 	}
 	defer conn.Close()

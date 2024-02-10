@@ -2,5 +2,5 @@
     "OperatorHost": "localhost",
     "OperatorPort": "9090",
     "ListenOperatorOn": "8001",
-    "ManagerPort": "8002"
+    "ListenOn": "8002"
 }

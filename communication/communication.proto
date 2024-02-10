@@ -7,13 +7,15 @@ option go_package="github.com/YanDanilin/ParallelProg/communication";
 message RequestToConnect {
     string ListenOperatorOn = 1;
     bool IsManager = 2;
+    string ListenOn = 4;
 }
 
 message ReplyToConnect {
     string Type = 1;
     string ManagerHost = 2;
     string ManagerPort = 3;
-    string Msg = 4;
+    bool IsManager = 4;
+    string Msg = 5;
 }
 
 message Task {
@@ -21,4 +23,15 @@ message Task {
     bool Ack = 2;
     repeated int32 Array = 3;
     bool InProcess = 4;
+}
+
+message Response {
+    int64 res = 1;
+    string ID = 2;
+}
+
+message OperToManager {
+    string ID = 1;
+    string WorkerConfig = 2;
+    string WorkerListenOn = 3;
 }
