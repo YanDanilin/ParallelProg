@@ -21,7 +21,7 @@ import (
 	"net"
 
 	pb "github.com/YanDanilin/ParallelProg/protobuf"
-	cmpb "github.com/YanDanilin/ParallelProg/communcation"
+	cmpb "github.com/YanDanilin/ParallelProg/communication"
 	"github.com/YanDanilin/ParallelProg/utils"
 	"github.com/google/uuid" // for creating unique ids
 

@@ -16,7 +16,7 @@ import (
 
 	"github.com/YanDanilin/ParallelProg/utils"
 	"github.com/google/uuid"
-	cmpb "github.com/YanDanilin/ParallelProg/communcation"
+	cmpb "github.com/YanDanilin/ParallelProg/communication"
 
 	"google.golang.org/protobuf/proto"
 )

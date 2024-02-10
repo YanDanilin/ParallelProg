@@ -2,7 +2,7 @@ syntax="proto3";
 
 package communication;
 
-option go_package="github.com/YanDanilin/ParallelProg/communcation";
+option go_package="github.com/YanDanilin/ParallelProg/communication";
 
 message RequestToConnect {
     string ListenOperatorOn = 1;
