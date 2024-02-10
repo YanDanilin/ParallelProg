@@ -1,0 +1,24 @@
+syntax="proto3";
+
+package communication;
+
+option go_package="github.com/YanDanilin/ParallelProg/communcation";
+
+message RequestToConnect {
+    string ListenOperatorOn = 1;
+    bool IsManager = 2;
+}
+
+message ReplyToConnect {
+    string Type = 1;
+    string ManagerHost = 2;
+    string ManagerPort = 3;
+    string Msg = 4;
+}
+
+message Task {
+    string ID = 1;
+    bool Ack = 2;
+    repeated int32 Array = 3;
+    bool InProcess = 4;
+}

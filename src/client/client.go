@@ -30,7 +30,6 @@ type ConfigStruct struct {
 }
 
 func readArray(input string) ([]int32, error) {
-
 	nums := strings.Split(input, " ")
 	var resArray []int32 = make([]int32, 0, 20)
 	for _, numStr := range nums {
@@ -60,7 +59,7 @@ func main() {
 	for reader.Scan() {
 		var input string = reader.Text()
 		if input == "quit" || input == "exit" {
-			return
+			break
 		}
 		array, err := readArray(input)
 		if err != nil {
@@ -75,9 +74,11 @@ func main() {
 			log.Printf("Error: %v", err)
 
 			fmt.Println("Try again?")
+			// вынести подключение в отдельную функцию
 		} else {
 			fmt.Println(response)
 		}
 	}
 
+	fmt.Println("Client stopped working")
 }

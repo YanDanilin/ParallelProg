@@ -5,6 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"net"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	// "os"
@@ -12,20 +15,28 @@ import (
 	"strings"
 
 	"github.com/YanDanilin/ParallelProg/utils"
+	"github.com/google/uuid"
+	cmpb "github.com/YanDanilin/ParallelProg/communcation"
+
+	"google.golang.org/protobuf/proto"
 )
 
 var configFilePathFlag = flag.String("configPath", "./src/worker/config.json", "path to configuration file for worker")
 var roleFlag = flag.String("role", "worker", "set role of worker ['worker' | 'manager']")
 
+type WorkerID uuid.UUID
+
 type ConfigWorker struct {
-	OperatorHost     string // worker will connect these host and port to send a request to connect ot server
+	ID               WorkerID // unique id of worker made by operator
+	OperatorHost     string   // worker will connect these host and port to send a request to connect ot server
 	OperatorPort     string
 	Host             string // where the worker works (figures out in main function)
 	ListenOperatorOn string // worker will get info from operator on this port
 	// ListenManagerOn  string // worker will get tasks from manager on this port
-	ManagerPort string // worker will send response to the manager on this port if worker is manager he will listen this port
 	ManagerHost string
-	IsManager   bool
+	ManagerPort      string // worker will send response to the manager on this port
+	IsManager        bool
+	IsBusy           bool
 }
 
 type ConfigStruct struct {
@@ -85,5 +96,8 @@ func main() {
 		}
 	}
 	defer conn.Close()
+	stop := make(chan os.Signal)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 
+	<-stop
 }

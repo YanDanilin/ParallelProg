@@ -1,19 +1,18 @@
 package main
 
 import (
-	"container/list"
-	"context"
-	"encoding/json"
-	"os/signal"
-	"strings"
-	"sync" // for mutex
-	"syscall"
-	"time" // for ConfigWorker.timeStart
+	"context"       // used in func Accepting to process failed connection due to finishing main func
+	"encoding/json" // for Marshaling json
+	"os/signal"     // for signals
+	"strings"       // for converting []byte to string
+	"sync"          // for mutex
+	"syscall"       // for syscall.SIGTERM
+	"time"          // for ConfigWorker.timeStart
 
 	//"encoding/json"
 	//"io"
-	"flag"
-	"os"
+	"flag" // for flag role and config path
+	"os"   // for signals
 
 	// "strconv"
 	//"fmt" // creating new errors
@@ -22,28 +21,33 @@ import (
 	"net"
 
 	pb "github.com/YanDanilin/ParallelProg/protobuf"
-	"google.golang.org/grpc"
-
+	cmpb "github.com/YanDanilin/ParallelProg/communcation"
 	"github.com/YanDanilin/ParallelProg/utils"
+	"github.com/google/uuid" // for creating unique ids
+
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/grpc"
 )
 
 type ConfigOperator struct {
 	Host            string
 	Port            string
 	ListenWorkersOn string
+	MaxTasks        int32
 }
 
 type ConfigWorker struct {
-	Id               WorkerID // unique id of worker made by operator
+	ID               WorkerID // unique id of worker made by operator
 	OperatorHost     string   // worker will connect these host and port to send a request to connect ot server
 	OperatorPort     string
 	Host             string // where the worker works (figures out in main function)
 	ListenOperatorOn string // worker will get info from operator on this port
-	ListenManagerOn  string // worker will get tasks from manager on this port
-	ManagerPort      string // worker will send response to the manager on this port
-	IsManager        bool
-	TimeStart        time.Time // timme when worker connected
-	IsBusy           bool
+	// ListenManagerOn  string // worker will get tasks from manager on this port
+	ManagerHost string
+	ManagerPort string // worker will send response to the manager on this port
+	IsManager   bool
+	TimeStart   time.Time // timme when worker connected
+	IsBusy      bool
 }
 
 var configFilePathFlag = flag.String("configPath", "./src/operator/config.json", "path to configuration file for operator")
@@ -56,8 +60,10 @@ type WorkersInfo struct {
 
 type operator struct {
 	pb.UnimplementedOperatorServer
-	Info       WorkersInfo
-	QueueTasks *list.List // queue of Tasks
+
+	Info WorkersInfo
+	// QueueTasks *list.List // queue of Tasks
+	Tasks map[TaskID]Task
 }
 
 var operServer operator
@@ -69,7 +75,9 @@ func (s *operator) ProcessRequest(ctx context.Context, request *pb.RequestFromCl
 	// 	sum += int64(elem)
 	// }
 	time.Sleep(time.Second * 3)
-	fmt.Println(s.Info)
+	fmt.Println(operServer.Info)
+	fmt.Println(operServer.Info.ManagerID)
+	fmt.Println(*operServer.Info.Workers[operServer.Info.ManagerID])
 	sum = 10
 	return &pb.ResponseToClient{Sum: sum}, nil
 }
@@ -78,9 +86,11 @@ type ConfigStruct struct {
 	ConfigOperator
 }
 
-type WorkerID int32
+type WorkerID uuid.UUID
+type TaskID uuid.UUID
 
 type Task struct {
+	ID        TaskID
 	Ack       bool
 	Array     []int32
 	InProcess bool
@@ -111,22 +121,13 @@ func main() {
 
 	operServer.Info = WorkersInfo{
 		Workers:      make(map[WorkerID]*ConfigWorker),
-		ManagerID:    -1,
+		ManagerID:    WorkerID(uuid.Nil),
 		WorkersCount: 0,
 	}
-	operServer.QueueTasks = list.New()
+	fmt.Println(operServer.Info)
 	var mutex sync.Mutex
 	ctx, cancel := context.WithCancel(context.Background())
-	// go func() {
-	// 	for {
-	// 		conn, err = workerListener.Accept()
-	// 		if err != nil {
-	// 			log.Println(err, "Failed to accept connecction")
-	// 		} else {
-	// 			handleWorker(conn, &mutex) // connection closes inside this func
-	// 		}
-	// 	}
-	// }()
+
 	go Accepting(ctx, workerListener, &mutex)
 
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -172,10 +173,9 @@ func handleWorker(conn net.Conn, mutex *sync.Mutex) error {
 	fmt.Println(workerConfigData)
 	connToWorker, err := net.Dial("tcp", strings.Split(workerAddr, ":")[0]+":"+workerConfigData.ListenOperatorOn)
 	if err != nil {
-		log.Println("connection failed")
+		log.Println("Connection failed")
 	}
-	fmt.Println(operServer.Info)
-	if operServer.Info.ManagerID == -1 && !workerConfigData.IsManager {
+	if operServer.Info.ManagerID == WorkerID(uuid.Nil) && !workerConfigData.IsManager {
 		connToWorker.Write([]byte("[WAIT] Still no manager in system\n Wait..."))
 		fmt.Println("Worker disconnected:", workerAddr)
 		return nil
@@ -183,25 +183,29 @@ func handleWorker(conn net.Conn, mutex *sync.Mutex) error {
 
 	mutex.Lock()
 	operServer.Info.WorkersCount++
-	if operServer.Info.ManagerID == -1 {
+	id := WorkerID(uuid.New())
+	for _, isIn := operServer.Info.Workers[id]; isIn; {
+		id = WorkerID(uuid.New())
+	}
+	if operServer.Info.ManagerID == WorkerID(uuid.Nil) {
 		if workerConfigData.IsManager {
-			operServer.Info.ManagerID = WorkerID(operServer.Info.WorkersCount)
+			operServer.Info.ManagerID = id
 		}
 	} else {
 		if workerConfigData.IsManager {
 			workerConfigData.IsManager = false
 		}
 	}
-	workerConfigData.Id = WorkerID(operServer.Info.WorkersCount)
+	workerConfigData.ID = id
 	workerConfigData.TimeStart = time.Now()
 	workerConfigData.Host = strings.Split(workerAddr, ":")[0]
-	if _, isIn := operServer.Info.Workers[workerConfigData.Id]; !isIn {
-		operServer.Info.Workers[workerConfigData.Id] = workerConfigData
-	}
+	// if _, isIn := operServer.Info.Workers[workerConfigData.Id]; !isIn {
+	operServer.Info.Workers[workerConfigData.ID] = workerConfigData
+	// }
 	msg := []byte("[INFO] " + operServer.Info.Workers[operServer.Info.ManagerID].Host + ":" + operServer.Info.Workers[operServer.Info.ManagerID].ManagerPort)
 	connToWorker.Write(msg)
-	fmt.Println(operServer.Info)
-	fmt.Println(*operServer.Info.Workers[operServer.Info.ManagerID])
+	// fmt.Println(operServer.Info)
+	// fmt.Println(*operServer.Info.Workers[operServer.Info.ManagerID])
 	mutex.Unlock()
 
 	fmt.Println("Worker disconnected:", workerAddr)
