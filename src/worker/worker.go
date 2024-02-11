@@ -1,16 +1,16 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
-
-	// "os"
-	"log"
 
 	cmpb "github.com/YanDanilin/ParallelProg/communication"
 	"github.com/YanDanilin/ParallelProg/utils"
@@ -41,9 +41,15 @@ type ConfigStruct struct {
 }
 
 type Worker struct {
-	Config      ConfigWorker
-	ManagerHost string
-	ManagerPort string // worker dials and sends responses to the manager on this port
+	Config       ConfigWorker
+	ManagerHost  string
+	ManagerPort  string // worker dials and sends responses to the manager on this port
+	operListener net.Listener
+	mutex        sync.Mutex
+}
+
+func (worker *Worker) Exec(stopCtx context.Context) {
+	worker.ExecManager(stopCtx)
 }
 
 func main() {
@@ -55,17 +61,17 @@ func main() {
 	if *roleFlag == "manager" {
 		configData.IsManager = true
 	}
-
-	operatorListener, err := net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
+	var worker Worker = Worker{}
+	worker.operListener, err = net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
 	utils.HandleError(err, "Failed to listen port "+configData.ListenOperatorOn)
-	defer operatorListener.Close()
+	defer worker.operListener.Close()
 	message, err := proto.Marshal(&cmpb.RequestToConnect{
 		ListenOperatorOn: configData.ListenOperatorOn,
 		IsManager:        configData.IsManager,
 		ListenOn:         configData.ListenOn,
 	})
 	var conn net.Conn
-	var worker Worker = Worker{}
+
 	for {
 		conn, err = net.Dial("tcp", configData.OperatorHost+":"+configData.OperatorPort)
 		if err != nil {
@@ -80,7 +86,7 @@ func main() {
 		_, err = conn.Write(message)
 		utils.HandleError(err, "Failed to send message")
 		// for {
-		connToOper, err := operatorListener.Accept()
+		connToOper, err := worker.operListener.Accept()
 		if err != nil {
 			fmt.Println("Failed to read response from operator")
 		}
@@ -92,11 +98,11 @@ func main() {
 		if reply.Type == "[WAIT]" {
 			fmt.Println(reply.Msg)
 			time.Sleep(time.Second * 2)
-			conn.Close()
 			continue
 		} else if reply.Type == "[INFO]" {
 			worker.ManagerHost = reply.ManagerHost
 			worker.ManagerPort = reply.ManagerPort
+			worker.Config.OperatorPort = reply.ListenManagerOn
 			if configData.IsManager && !reply.IsManager {
 				log.Println(reply.Msg)
 			}
@@ -105,10 +111,14 @@ func main() {
 		} else {
 			log.Println(reply.Msg)
 		}
+		conn.Close()
 	}
-	defer conn.Close()
+	// defer conn.Close()
 	stop := make(chan os.Signal)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	stopCtx, stopCancel := context.WithCancel(context.Background())
+	worker.Exec(stopCtx)
 
 	<-stop
+	stopCancel()
 }

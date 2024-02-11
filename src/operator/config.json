@@ -2,5 +2,6 @@
     "Host": "localhost",
     "Port": "50051",
     "ListenWorkersOn": "9090",
+    "ListenManagerOn": "8003",
     "MaxTasks": 1000
 }

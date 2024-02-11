@@ -14,8 +14,9 @@ message ReplyToConnect {
     string Type = 1;
     string ManagerHost = 2;
     string ManagerPort = 3;
-    bool IsManager = 4;
-    string Msg = 5;
+    string ListenManagerOn = 4;
+    bool IsManager = 5;
+    string Msg = 6;
 }
 
 message Task {
@@ -31,7 +32,13 @@ message Response {
 }
 
 message OperToManager {
-    string ID = 1;
-    string WorkerConfig = 2;
-    string WorkerListenOn = 3;
+    string Type = 1;
+    string ID = 2;
+    string WorkerHost = 3;
+    string WorkerListenOn = 4;
+}
+
+message OperWorker {
+    string Type = 1;
+    string msg = 2;
 }
