@@ -45,11 +45,22 @@ type Worker struct {
 	ManagerHost  string
 	ManagerPort  string // worker dials and sends responses to the manager on this port
 	operListener net.Listener
+	TasksDone    int32
 	mutex        sync.Mutex
 }
 
 func (worker *Worker) Exec(stopCtx context.Context) {
-	worker.ExecManager(stopCtx)
+	if worker.Config.IsManager {
+		worker.ExecManager(stopCtx)
+	} else {
+		changeToManagerCtx, changeToManagerCancel := context.WithCancel(context.Background())
+		worker.ExecWorker(stopCtx, changeToManagerCtx, changeToManagerCancel)
+		if stopCtx.Err() != context.Canceled {
+			if changeToManagerCtx.Err() == context.Canceled {
+				worker.ExecManager(stopCtx)
+			}
+		}
+	}
 }
 
 func main() {
@@ -87,6 +98,7 @@ func main() {
 		utils.HandleError(err, "Failed to send message")
 		// for {
 		connToOper, err := worker.operListener.Accept()
+		defer connToOper.Close()
 		if err != nil {
 			fmt.Println("Failed to read response from operator")
 		}
@@ -102,7 +114,7 @@ func main() {
 		} else if reply.Type == "[INFO]" {
 			worker.ManagerHost = reply.ManagerHost
 			worker.ManagerPort = reply.ManagerPort
-			worker.Config.OperatorPort = reply.ListenManagerOn
+			worker.Config.OperatorPort = reply.OperPort
 			if configData.IsManager && !reply.IsManager {
 				log.Println(reply.Msg)
 			}
@@ -117,7 +129,7 @@ func main() {
 	stop := make(chan os.Signal)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	stopCtx, stopCancel := context.WithCancel(context.Background())
-	worker.Exec(stopCtx)
+	go worker.Exec(stopCtx)
 
 	<-stop
 	stopCancel()

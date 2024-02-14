@@ -162,7 +162,11 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 	}
 	for {
 		conn, err := operServer.ManagerListener.Accept()
+		defer conn.Close()
 		if err != nil {
+			if ctx.Err() == context.Canceled {
+				return
+			}
 			//handle error
 		}
 		buffer := make([]byte, 1024)
@@ -176,11 +180,14 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 		response := new(cmpb.Response)
 		proto.Unmarshal(buffer[:bytesRead], response)
 		id, _ := uuid.Parse(response.ID)
+		operServer.mutex.Lock()
+		delete(operServer.Tasks, TaskID(id))
+		operServer.mutex.Unlock()
 		operServer.Responses[TaskID(id)] = response
 	}
 }
 
-func (operServer *operator) Accepting(ctx context.Context, workerListener net.Listener, mutex *sync.Mutex) {
+func (operServer *operator) AcceptingWorkers(ctx context.Context, workerListener net.Listener) {
 	var conn net.Conn
 	var err error
 	go func() {
@@ -194,7 +201,7 @@ func (operServer *operator) Accepting(ctx context.Context, workerListener net.Li
 			}
 			log.Println(err, "Failed to accept connecction")
 		} else {
-			err = operServer.handleWorker(conn, mutex) // connection closes inside this func
+			err = operServer.handleWorker(conn) // connection closes inside this func
 			if err != nil {
 				log.Println("Failed to handle worker connection")
 			}
@@ -203,8 +210,8 @@ func (operServer *operator) Accepting(ctx context.Context, workerListener net.Li
 	}
 }
 
-func (operServer *operator) handleWorker(conn net.Conn, mutex *sync.Mutex) error {
-	// defer conn.Close()
+func (operServer *operator) handleWorker(conn net.Conn) error {
+	defer conn.Close()
 	workerAddr := conn.RemoteAddr().String()
 	fmt.Println("Worker connected:", workerAddr)
 
@@ -233,7 +240,7 @@ func (operServer *operator) handleWorker(conn net.Conn, mutex *sync.Mutex) error
 		return err
 	}
 
-	mutex.Lock()
+	operServer.mutex.Lock()
 	operServer.Info.WorkersCount++
 	id := WorkerID(uuid.New())
 	var msg string
@@ -257,17 +264,17 @@ func (operServer *operator) handleWorker(conn net.Conn, mutex *sync.Mutex) error
 	workerConfigData.TimeStart = time.Now()
 	operServer.Info.Workers[workerConfigData.ID] = workerConfigData
 	// }
-	var lisManagerOn string
+	var operPort string = operServer.ConfigData.ListenWorkersOn
 	if workerConfigData.IsManager {
-		lisManagerOn = operServer.ConfigData.ListenManagerOn
+		operPort = operServer.ConfigData.ListenManagerOn
 	}
 	reply, err := proto.Marshal(&cmpb.ReplyToConnect{
-		Type:            "[INFO]",
-		ManagerHost:     operServer.Info.ManagerHost,
-		ManagerPort:     operServer.Info.ManagerPort,
-		ListenManagerOn: lisManagerOn,
-		IsManager:       workerConfigData.IsManager,
-		Msg:             msg,
+		Type:        "[INFO]",
+		ManagerHost: operServer.Info.ManagerHost,
+		ManagerPort: operServer.Info.ManagerPort,
+		OperPort:    operPort,// для менеджера здесь указан другой порт
+		IsManager:   workerConfigData.IsManager,
+		Msg:         msg,
 	})
 	_, err = connToWorker.Write(reply)
 	if err != nil { // надо как-то по-другому обработать
@@ -276,7 +283,7 @@ func (operServer *operator) handleWorker(conn net.Conn, mutex *sync.Mutex) error
 	if workerConfigData.IsManager {
 		operServer.ConnToManager = connToWorker
 	} else {
-		conn.Close()
+		connToWorker.Close()
 		msgToManager, _ := proto.Marshal(&cmpb.OperToManager{
 			Type:           "[INFO]",
 			ID:             uuid.UUID(workerConfigData.ID).String(),
@@ -285,7 +292,7 @@ func (operServer *operator) handleWorker(conn net.Conn, mutex *sync.Mutex) error
 		})
 		operServer.ConnToManager.Write(msgToManager)
 	}
-	mutex.Unlock()
+	operServer.mutex.Unlock()
 	fmt.Println("Worker disconnected:", workerAddr)
 	return err
 }
@@ -328,7 +335,7 @@ func main() {
 	//var mutex sync.Mutex
 	ctxW, cancelW := context.WithCancel(context.Background())
 	ctxM, cancelM := context.WithCancel(context.Background())
-	go operServer.Accepting(ctxW, workerListener, &operServer.mutex)
+	go operServer.AcceptingWorkers(ctxW, workerListener)
 	// operServer.ConnectToManager(&operServer.mutex)
 
 	server := grpc.NewServer()

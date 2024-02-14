@@ -14,7 +14,7 @@ message ReplyToConnect {
     string Type = 1;
     string ManagerHost = 2;
     string ManagerPort = 3;
-    string ListenManagerOn = 4;
+    string OperPort = 4;
     bool IsManager = 5;
     string Msg = 6;
 }
