@@ -17,6 +17,7 @@ message ReplyToConnect {
     string OperPort = 4;
     bool IsManager = 5;
     string Msg = 6;
+    string ID = 7;
 }
 
 message Task {

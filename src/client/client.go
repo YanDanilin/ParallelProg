@@ -1,21 +1,19 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"flag"
 	"fmt"
 	"log"
-
-	"bufio"
 	"os"
 	"strconv"
 	"strings"
 
 	pb "github.com/YanDanilin/ParallelProg/protobuf"
+	"github.com/YanDanilin/ParallelProg/utils"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-
-	"github.com/YanDanilin/ParallelProg/utils"
 )
 
 var configFilePathFlag = flag.String("configPath", "./src/client/config.json", "path to configuration file for client")
@@ -73,7 +71,7 @@ func main() {
 			log.Println("Connection to operator lost")
 			log.Printf("Error: %v", err)
 
-			fmt.Println("Try again?")
+			// fmt.Println("Try again?")
 			// вынести подключение в отдельную функцию
 		} else {
 			fmt.Println(response)

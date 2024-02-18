@@ -22,6 +22,14 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const (
+	typeOrder  string = "[ORDER]"
+	typeCheck  string = "[CHECK]"
+	typeTime   string = "[TIME]"
+	typeChange string = "[CHANGE]"
+	typeMInfo string = "[MANAGERINFO]"
+)
+
 func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager context.CancelFunc) {
 	for {
 		conn, err := worker.operListener.Accept()
@@ -33,20 +41,26 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 		}
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
+		if err != nil {
+			if stopCtx.Err() == context.Canceled {
+				return
+			}
+			// handle error
+		}
 		var msg cmpb.ReplyToConnect
 		proto.Unmarshal(buffer[:bytesRead], &msg)
-		if msg.Type == "[ORDER]" {
+		if msg.Type == typeOrder {
 			// become manager mb with contex? cancel?
 			changeToManager()
 			conn.Close()
 			return
-		} else if msg.Type == "[CHECK]" {
+		} else if msg.Type == typeCheck {
 			conn.Write(buffer[:bytesRead])
-		} else if msg.Type == "[TIME]" {
+		} else if msg.Type == typeTime {
 			msg.Msg = strconv.FormatInt(int64(worker.TasksDone), 10)
 			reply, _ := proto.Marshal(&msg)
 			conn.Write(reply)
-		} else if msg.Type == "[CHANGE]" {
+		} else if msg.Type == typeChange {
 			// отправлять дргуому менеджеру
 			// мб передать функцию для подключению к другому менеджеру
 		}
@@ -54,32 +68,47 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 	}
 }
 
-func (worker *Worker) GettingTask(ctx context.Context) {
+func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx context.Context) {
 	managerListener, err := net.Listen("tcp", worker.Config.Host+":"+worker.Config.ListenOn)
-	defer managerListener.Close()
 	if err != nil {
+		if ctx.Err() == context.Canceled {
+			return
+		}
 		// handle error
 	}
+	defer managerListener.Close()
 	for {
 		conn, err := managerListener.Accept()
 		if err != nil {
-			if ctx.Err() == context.Canceled {
-				conn.Close()
+			if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
+				//conn.Close()
 				return
 			}
 			// handle error
 		}
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
+		if err != nil {
+			if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
+				conn.Close()
+				return
+			}
+			// handle error
+		}
 		task := cmpb.Task{}
-		err = proto.Unmarshal(buffer[:bytesRead], &task)
+		proto.Unmarshal(buffer[:bytesRead], &task)
 		response := worker.processingTask(&task)
 		marshaledResponse, _ := proto.Marshal(&response)
-		worker.mutex.Lock()
-		connToManager, err := net.Dial("tcp", worker.ManagerHost+":"+worker.ManagerPort)
-		worker.mutex.Unlock()
-		if err != nil {
-			// что делать, елси менеджер не отвечает
+		var connToManager net.Conn
+		for {
+			worker.mutex.Lock()
+			connToManager, err = net.Dial("tcp", worker.ManagerHost+":"+worker.ManagerPort)
+			worker.mutex.Unlock()
+			if err != nil {
+				// что делать, если менеджер не отвечает
+				continue
+			}
+			break
 		}
 		connToManager.Write(marshaledResponse)
 		conn.Close()
@@ -97,12 +126,30 @@ func (worker *Worker) processingTask(task *cmpb.Task) cmpb.Response {
 	return cmpb.Response{ID: task.ID, Res: sum}
 }
 
+func (worker *Worker) getManagerInfo() {
+	worker.mutex.Lock()
+	conn, err := worker.operListener.Accept()
+	if err != nil {
+		// handle error
+	}
+	buffer := make([]byte, 1024)
+	bytesRead, _ := conn.Read(buffer)
+	var msg cmpb.ReplyToConnect
+	proto.Unmarshal(buffer[:bytesRead], &msg)
+	worker.Config.IsManager = true
+	worker.Config.OperatorPort = msg.OperPort
+	worker.ManagerPort = worker.Config.ListenOn
+	worker.ManagerHost = worker.Config.Host
+	worker.mutex.Unlock()
+}
+
 func (worker *Worker) ExecWorker(stopCtx context.Context, changeToManagerCtx context.Context, changeToManagerCancel context.CancelFunc) {
 	go worker.ConnectToOper(stopCtx, changeToManagerCancel)
-	go worker.GettingTask(stopCtx)
+	go worker.GettingTask(stopCtx, changeToManagerCtx)
 
 	select {
 	case <-stopCtx.Done():
 	case <-changeToManagerCtx.Done():
+		worker.getManagerInfo()
 	}
 }

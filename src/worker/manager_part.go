@@ -21,6 +21,13 @@ import (
 	"google.golang.org/protobuf/proto"
 )
 
+const (
+	typeInfo       string = "[INFO]"
+	typeWorkerDead string = "[WORKERDEAD]"
+	typeBusy string = "[BUSY]"
+	typeFree string = "[FREE]"
+)
+
 type TaskID uuid.UUID
 
 type WInfo struct {
@@ -49,6 +56,12 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 		}
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
+		if err != nil {
+			// handle error
+			if stopCtx.Err() == context.Canceled {
+				return
+			}
+		}
 		workerInfo := new(cmpb.OperToManager)
 		err = proto.Unmarshal(buffer[:bytesRead], workerInfo)
 		if err != nil {
@@ -60,7 +73,7 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 		} else {
 			id, _ := uuid.Parse(workerInfo.ID)
 			idW := WorkerID(id)
-			if workerInfo.Type == "[INFO]" {
+			if workerInfo.Type == typeInfo {
 				wInfo := new(WInfo)
 				wInfo.OperToManager = workerInfo
 				wInfo.Task = nil
@@ -69,17 +82,19 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 				manager.WorkersCount++
 				manager.FreeWorkers[idW] = struct{}{}
 				manager.Worker.mutex.Unlock()
-			} else if workerInfo.Type == "[WORKERDEAD]" {
+			} else if workerInfo.Type == typeWorkerDead {
 				manager.Worker.mutex.Lock()
-				if wInfo, _ := manager.WorkersInfo[idW]; wInfo.Task != nil {
+				if wInfo := manager.WorkersInfo[idW]; wInfo.Task != nil {
 					manager.Tasks.PushFront(wInfo.Task)
 				}
 				delete(manager.WorkersInfo, idW)
 				manager.WorkersCount--
-				if _, isIn := manager.FreeWorkers[idW]; isIn {
-					delete(manager.FreeWorkers, idW)
-				}
+				// if _, isIn := manager.FreeWorkers[idW]; isIn {
+				delete(manager.FreeWorkers, idW)
+				// }
 				manager.Worker.mutex.Unlock()
+			} else if workerInfo.Type == typeCheck {
+				continue
 			}
 		}
 	}
@@ -94,11 +109,12 @@ func (manager *Manager) findFreeWorker() (net.Conn, WorkerID) {
 	var idRet WorkerID
 	var conn net.Conn
 	var err error
-	for id, _ := range manager.FreeWorkers {
+	for id := range manager.FreeWorkers {
 		if i == num {
 			conn, err = net.Dial("tcp", manager.WorkersInfo[id].OperToManager.WorkerHost+":"+manager.WorkersInfo[id].OperToManager.WorkerListenOn)
 			if err != nil {
 				// handle error
+				continue
 			}
 			idRet = id
 			break
@@ -128,6 +144,8 @@ func (manager *Manager) SendTaskToWorker(stopCtx context.Context) {
 			taskID, _ := uuid.Parse(task.ID)
 			manager.BusyWorkers[TaskID(taskID)] = manager.WorkersInfo[id]
 			delete(manager.FreeWorkers, id)
+			msg, _ = proto.Marshal(&cmpb.OperToManager{Type: typeBusy, ID: uuid.UUID(id).String()})
+			manager.ConnToOper.Write(msg)
 			manager.Worker.mutex.Unlock()
 		} else {
 			manager.Worker.mutex.Unlock()
@@ -150,6 +168,7 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 			if stopCtx.Err() == context.Canceled {
 				return
 			}
+			/// handle error
 		}
 		defer conn.Close()
 		buffer := make([]byte, 1024)
@@ -167,7 +186,11 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 		wInfo := manager.BusyWorkers[TaskID(uuID)]
 		delete(manager.BusyWorkers, TaskID(uuID))
 		wID, _ := uuid.Parse(wInfo.OperToManager.ID)
-		manager.FreeWorkers[WorkerID(wID)] = struct{}{}
+		if WorkerID(wID) != manager.Worker.MyID {
+			manager.FreeWorkers[WorkerID(wID)] = struct{}{}
+		}
+		msg, _ := proto.Marshal(&cmpb.OperToManager{Type: typeFree, ID: uuid.UUID(wID).String()})
+		manager.ConnToOper.Write(msg)
 		manager.Worker.mutex.Unlock()
 		go func() {
 			manager.ConnToOper.Write(buffer[:bytesRead])

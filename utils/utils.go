@@ -14,7 +14,7 @@ func HandleError(err error, msg string) {
 	}
 }
 
-func DecodeConfigJSON(configFilePath string, val interface{})  error {
+func DecodeConfigJSON(configFilePath string, val interface{}) error {
 	// reading config.json
 	file, err := os.Open(configFilePath)
 	if err != nil {
