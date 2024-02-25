@@ -28,11 +28,15 @@ import (
 var configFilePathFlag = flag.String("configPath", "./src/operator/config.json", "path to configuration file for operator")
 
 const (
-	typeTime  string = "[TIME]"
-	typeOrder string = "[ORDER]"
-	typeMInfo string = "[MANAGERINFO]" // мб не нужен
-	typeBusy  string = "[BUSY]"
-	typeFree  string = "[FREE]"
+	typeTime   string = "[TIME]"
+	typeOrder  string = "[ORDER]"
+	typeMInfo  string = "[MANAGERINFO]" // мб не нужен
+	typeBusy   string = "[BUSY]"
+	typeFree   string = "[FREE]"
+	typeChange string = "[CHANGE]"
+	typeInfo   string = "[INFO]"
+	typeTask   string = "[TASK]"
+	typeResp   string = "[RESPONSE]"
 )
 
 type ConfigOperator struct {
@@ -80,6 +84,7 @@ type operator struct {
 	pb.UnimplementedOperatorServer
 	ConfigData      ConfigOperator
 	mutex           sync.Mutex
+	responseMutex   sync.Mutex
 	Info            WorkersInfo
 	ConnToManager   net.Conn
 	ManagerListener net.Listener
@@ -92,11 +97,15 @@ func (operServer *operator) AddTask(arr []int32) TaskID {
 	for _, isIn := operServer.Tasks[id]; isIn; {
 		id = TaskID(uuid.New())
 	}
+	fmt.Println("add task", arr)
 	task := new(cmpb.Task)
+	task.Type = typeTask
 	task.ID = uuid.UUID(id).String()
-	task.Array = make([]int32, 0)
+	task.Array = make([]int32, len(arr))
 	copy(task.Array, arr)
 	operServer.Tasks[id] = TaskInfo{Task: task}
+	fmt.Println(operServer.Tasks[id].Task.ID)
+	fmt.Println(operServer.Tasks[id].Task.Array)
 	// operServer.Tasks[id].task.ID = uuid.UUID(id).String()
 	// //operServer.Tasks[id].task.Ack = false
 	// operServer.Tasks[id].task.Array = make([]int32, 0)
@@ -128,6 +137,7 @@ func (operServer *operator) AddTask(arr []int32) TaskID {
 // }
 
 func (operServer *operator) SendTaskToManager(task *cmpb.Task) { // func is called when connection exists
+	fmt.Println(task.Array)
 	msg, _ := proto.Marshal(task)
 	for {
 		operServer.mutex.Lock()
@@ -135,6 +145,7 @@ func (operServer *operator) SendTaskToManager(task *cmpb.Task) { // func is call
 			operServer.mutex.Unlock()
 			// time.Sleep(500 * time.Millisecond)
 		} else {
+			fmt.Println("task written to manager")
 			operServer.mutex.Unlock()
 			break
 		}
@@ -146,11 +157,15 @@ func (operServer *operator) ProcessRequest(ctx context.Context, request *pb.Requ
 	var sum int64 = 0
 	id := operServer.AddTask(request.Array)
 	operServer.SendTaskToManager(operServer.Tasks[id].Task)
+	fmt.Println("Task sent")
 	for {
+		operServer.responseMutex.Lock()
 		if response, isIn := operServer.Responses[id]; isIn {
 			sum = response.Res
+			operServer.responseMutex.Unlock()
 			break
 		}
+		operServer.responseMutex.Unlock()
 		// response, err := operServer.WaitForResponse()
 		// if err != nil {
 		// 	log.Println("Manager disconnected")
@@ -173,16 +188,18 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 	if err1 != nil {
 		log.Fatalln("Failed to listen manager")
 	}
+	fmt.Println("Listening manager")
+	conn, _ := operServer.ManagerListener.Accept()
+	defer conn.Close()
 	for {
-		conn, err := operServer.ManagerListener.Accept()
-		if err != nil {
-			if ctx.Err() == context.Canceled {
-				return
-			}
-			log.Println("Listening failed") // может ли здесь вылезти ошибка, если менеджер умрет
-			// handle error
-		}
-		defer conn.Close()
+		// if err != nil {
+		// 	if ctx.Err() == context.Canceled {
+		// 		return
+		// 	}
+		// 	log.Println("Listening failed") // может ли здесь вылезти ошибка, если менеджер умрет
+		// 	// handle error
+		// }
+		// defer conn.Close()
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
 		if err != nil {
@@ -191,27 +208,33 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 			}
 			// handle error
 		}
+		var respMsg cmpb.OperToManager
+		proto.Unmarshal(buffer[:bytesRead], &respMsg)
 		response := new(cmpb.Response)
-		err = proto.Unmarshal(buffer[:bytesRead], response) // принимать сообщение о занятости воркера
-		if err == nil {
+		proto.Unmarshal(buffer[:bytesRead], response) // принимать сообщение о занятости воркера
+		var isBusy bool
+		if respMsg.Type == typeBusy {
+			isBusy = true
+			wID, _ := uuid.Parse(respMsg.ID)
+			fmt.Println("Worker ", wID, " is busy")
+			operServer.mutex.Lock()
+			operServer.Info.Workers[WorkerID(wID)].IsBusy = isBusy
+			operServer.mutex.Unlock()
+		} else if respMsg.Type == typeFree {
+			isBusy = false
+			wID, _ := uuid.Parse(respMsg.ID)
+			fmt.Println("Worker ", wID, " is free")
+			operServer.mutex.Lock()
+			operServer.Info.Workers[WorkerID(wID)].IsBusy = isBusy
+			operServer.mutex.Unlock()
+		} else { // when OperToManager read
 			id, _ := uuid.Parse(response.ID)
 			operServer.mutex.Lock()
 			delete(operServer.Tasks, TaskID(id))
 			operServer.mutex.Unlock()
+			operServer.responseMutex.Lock()
 			operServer.Responses[TaskID(id)] = response
-		} else {
-			var respMsg cmpb.OperToManager
-			proto.Unmarshal(buffer[:bytesRead], &respMsg)
-			wID, _ := uuid.Parse(respMsg.ID)
-			var isBusy bool
-			if respMsg.Type == typeBusy {
-				isBusy = true
-			} else if respMsg.Type == typeFree {
-				isBusy = false
-			}
-			operServer.mutex.Lock()
-			operServer.Info.Workers[WorkerID(wID)].IsBusy = isBusy
-			operServer.mutex.Unlock()
+			operServer.responseMutex.Unlock()
 		}
 	}
 }
@@ -306,20 +329,24 @@ func (operServer *operator) handleWorker(conn net.Conn) error {
 		Msg:         msg,
 		ID:          uuid.UUID(id).String(),
 	})
+	fmt.Println(reply)
 	_, err = connToWorker.Write(reply)
 	if err != nil { // надо как-то по-другому обработать
 		fmt.Println("Failed to send reply to worker " + workerAddr)
 	}
 	if workerConfigData.IsManager {
 		operServer.ConnToManager = connToWorker
+		fmt.Println("conn to manager saved")
 	} else {
 		connToWorker.Close()
+		// operServer.ConnToManager, _ = net.Dial("tcp",  operServer.Info.ManagerHost+":"+operServer.Info.Workers[operServer.Info.ManagerID].ListenOperatorOn)
 		msgToManager, _ := proto.Marshal(&cmpb.OperToManager{
 			Type:           "[INFO]",
 			ID:             uuid.UUID(workerConfigData.ID).String(),
 			WorkerHost:     workerConfigData.Host,
 			WorkerListenOn: workerConfigData.ListenOn,
 		})
+		fmt.Println("send info about worker")
 		operServer.ConnToManager.Write(msgToManager)
 	}
 	operServer.mutex.Unlock()
@@ -362,10 +389,31 @@ func (operServer *operator) CheckWorkers(stopCtx context.Context) {
 	}
 }
 
-func (operServer *operator) ditribute() {
-	// for id, workerConfig := range operServer.Info.Workers {
+func (operServer *operator) distribute() {
+	for id, workerConfig := range operServer.Info.Workers {
+		if id != operServer.Info.ManagerID {
+			conn, err := net.Dial("tcp", workerConfig.Host+":"+workerConfig.ListenOperatorOn)
+			if err != nil {
+				continue
+			}
+			defer conn.Close()
+			msg, _ := proto.Marshal(&cmpb.ReplyToConnect{
+				Type:        typeChange,
+				ManagerHost: operServer.Info.ManagerHost,
+				ManagerPort: operServer.Info.ManagerPort,
+			})
+			conn.Write(msg)
 
-	// }
+			msg, _ = proto.Marshal(&cmpb.OperToManager{
+				Type:           typeInfo,
+				WorkerHost:     workerConfig.Host,
+				WorkerListenOn: workerConfig.ListenOn,
+				ID:             uuid.UUID(id).String(),
+				IsBusy:         workerConfig.IsBusy,
+			})
+			operServer.ConnToManager.Write(msg)
+		}
+	}
 }
 
 func (operServer *operator) chooseManager() {
@@ -406,6 +454,8 @@ func (operServer *operator) chooseManager() {
 		Type:     typeMInfo,
 		OperPort: operServer.ConfigData.ListenManagerOn,
 	})
+	connToWorker.Write(msg)
+	operServer.distribute()
 	operServer.mutex.Unlock()
 }
 

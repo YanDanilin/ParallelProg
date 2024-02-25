@@ -1,6 +1,6 @@
 {
     "OperatorHost": "localhost",
     "OperatorPort": "9090",
-    "ListenOperatorOn": "8009",
-    "ListenOn": "8010"
+    "ListenOperatorOn": "8007",
+    "ListenOn": "8006"
 }

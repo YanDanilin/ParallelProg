@@ -25,6 +25,7 @@ message Task {
     bool Ack = 2;
     repeated int32 Array = 3;
     bool InProcess = 4;
+    string Type = 5;
 }
 
 message Response {
@@ -37,6 +38,7 @@ message OperToManager {
     string ID = 2;
     string WorkerHost = 3;
     string WorkerListenOn = 4;
+    bool IsBusy = 5;
 }
 
 message OperWorker {

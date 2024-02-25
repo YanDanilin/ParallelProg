@@ -65,17 +65,19 @@ func main() {
 			continue
 		}
 		fmt.Println(array)
-		response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
+		go func() {
+			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
 
-		if err != nil {
-			log.Println("Connection to operator lost")
-			log.Printf("Error: %v", err)
+			if err != nil {
+				log.Println("Connection to operator lost")
+				log.Printf("Error: %v", err)
 
-			// fmt.Println("Try again?")
-			// вынести подключение в отдельную функцию
-		} else {
-			fmt.Println(response)
-		}
+				// fmt.Println("Try again?")
+				// вынести подключение в отдельную функцию
+			} else {
+				fmt.Println(response)
+			}
+		}()
 	}
 
 	fmt.Println("Client stopped working")

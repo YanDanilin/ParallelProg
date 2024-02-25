@@ -41,19 +41,22 @@ type ConfigStruct struct {
 }
 
 type Worker struct {
-	Config       ConfigWorker
-	ManagerHost  string
-	ManagerPort  string // worker dials and sends responses to the manager on this port
-	operListener net.Listener
-	TasksDone    int32
-	MyID         WorkerID
-	mutex        sync.Mutex
+	Config      ConfigWorker
+	ManagerHost string
+	ManagerPort string // worker dials and sends responses to the manager on this port
+	//operListener net.Listener
+	ConnToOper net.Conn
+	TasksDone  int32
+	MyID       WorkerID
+	mutex      sync.Mutex
 }
 
 func (worker *Worker) Exec(stopCtx context.Context) {
+	fmt.Println(worker.Config.IsManager)
 	if worker.Config.IsManager {
 		worker.ExecManager(stopCtx)
 	} else {
+		fmt.Println("exec func")
 		changeToManagerCtx, changeToManagerCancel := context.WithCancel(context.Background())
 		worker.ExecWorker(stopCtx, changeToManagerCtx, changeToManagerCancel)
 		if stopCtx.Err() != context.Canceled {
@@ -74,14 +77,15 @@ func main() {
 		configData.IsManager = true
 	}
 	var worker Worker = Worker{}
-	worker.operListener, err = net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
+	operListener, err := net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
 	utils.HandleError(err, "Failed to listen port "+configData.ListenOperatorOn)
-	defer worker.operListener.Close()
+	defer operListener.Close()
 	message, _ := proto.Marshal(&cmpb.RequestToConnect{
 		ListenOperatorOn: configData.ListenOperatorOn,
 		IsManager:        configData.IsManager,
 		ListenOn:         configData.ListenOn,
 	})
+	worker.Config = configData.ConfigWorker
 	var conn net.Conn
 
 	for {
@@ -92,25 +96,28 @@ func main() {
 			conn, err = net.Dial("tcp", configData.OperatorHost+":"+configData.OperatorPort)
 			utils.HandleError(err, "Failed to connect after waiting")
 		}
-
 		fmt.Println("Connected to operator!")
 
 		_, err = conn.Write(message)
+		fmt.Println("msg written")
 		utils.HandleError(err, "Failed to send message")
 		// for {
-		connToOper, err := worker.operListener.Accept()
+		buffer := make([]byte, 1024)
+		worker.ConnToOper, err = operListener.Accept()
 		if err != nil {
 			fmt.Println("Failed to read response from operator")
 		}
-		defer connToOper.Close()
-		buffer := make([]byte, 1024)
-		bytesRead, err := connToOper.Read(buffer)
+		defer worker.ConnToOper.Close()
+		bytesRead, err := worker.ConnToOper.Read(buffer)
 		utils.HandleError(err, "Failed to read reply from operator")
 		var reply cmpb.ReplyToConnect
 		proto.Unmarshal(buffer[:bytesRead], &reply)
+		fmt.Println(reply.Type)
 		if reply.Type == "[WAIT]" {
 			fmt.Println(reply.Msg)
-			time.Sleep(time.Second * 2)
+			time.Sleep(time.Second * 5)
+			worker.ConnToOper.Close()
+			conn.Close()
 			continue
 		} else if reply.Type == "[INFO]" {
 			worker.ManagerHost = reply.ManagerHost
@@ -121,17 +128,21 @@ func main() {
 			if configData.IsManager && !reply.IsManager {
 				log.Println(reply.Msg)
 			}
-			configData.IsManager = reply.IsManager
+			worker.Config.IsManager = reply.IsManager
+			//connToOper.Close()
+			conn.Close()
 			break
 		} else {
 			log.Println(reply.Msg)
 		}
+		//connToOper.Close()
 		conn.Close()
 	}
 	// defer conn.Close()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	stopCtx, stopCancel := context.WithCancel(context.Background())
+	fmt.Println("Ready to exec")
 	go worker.Exec(stopCtx)
 
 	<-stop

@@ -27,20 +27,20 @@ const (
 	typeCheck  string = "[CHECK]"
 	typeTime   string = "[TIME]"
 	typeChange string = "[CHANGE]"
-	typeMInfo string = "[MANAGERINFO]"
+	typeMInfo  string = "[MANAGERINFO]"
 )
 
 func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager context.CancelFunc) {
 	for {
-		conn, err := worker.operListener.Accept()
-		if err != nil {
-			if stopCtx.Err() == context.Canceled {
-				return
-			}
-			// handle error
-		}
+		// conn, err := worker.operListener.Accept()
+		// if err != nil {
+		// 	if stopCtx.Err() == context.Canceled {
+		// 		return
+		// 	}
+		// 	// handle error
+		// }
 		buffer := make([]byte, 1024)
-		bytesRead, err := conn.Read(buffer)
+		bytesRead, err := worker.ConnToOper.Read(buffer)
 		if err != nil {
 			if stopCtx.Err() == context.Canceled {
 				return
@@ -52,19 +52,19 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 		if msg.Type == typeOrder {
 			// become manager mb with contex? cancel?
 			changeToManager()
-			conn.Close()
+			//conn.Close()
 			return
 		} else if msg.Type == typeCheck {
-			conn.Write(buffer[:bytesRead])
+			worker.ConnToOper.Write(buffer[:bytesRead])
 		} else if msg.Type == typeTime {
 			msg.Msg = strconv.FormatInt(int64(worker.TasksDone), 10)
 			reply, _ := proto.Marshal(&msg)
-			conn.Write(reply)
+			worker.ConnToOper.Write(reply)
 		} else if msg.Type == typeChange {
 			// отправлять дргуому менеджеру
 			// мб передать функцию для подключению к другому менеджеру
 		}
-		conn.Close()
+		// conn.Close()
 	}
 }
 
@@ -76,9 +76,12 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 		}
 		// handle error
 	}
+	fmt.Println(worker.Config.Host + ":" + worker.Config.ListenOn)
+	fmt.Println("Listening")
 	defer managerListener.Close()
 	for {
 		conn, err := managerListener.Accept()
+		fmt.Println("Accepted")
 		if err != nil {
 			if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
 				//conn.Close()
@@ -97,6 +100,7 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 		}
 		task := cmpb.Task{}
 		proto.Unmarshal(buffer[:bytesRead], &task)
+		fmt.Println("Task is ready to be done")
 		response := worker.processingTask(&task)
 		marshaledResponse, _ := proto.Marshal(&response)
 		var connToManager net.Conn
@@ -111,6 +115,7 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 			break
 		}
 		connToManager.Write(marshaledResponse)
+		fmt.Println("response written")
 		conn.Close()
 		connToManager.Close()
 	}
@@ -122,18 +127,20 @@ func (worker *Worker) processingTask(task *cmpb.Task) cmpb.Response {
 	for _, elem := range task.Array {
 		sum += int64(elem)
 	}
-	time.Sleep(time.Duration(3000+rand.Intn(7000)) * time.Millisecond) // hard work is done
+	sleepTime := time.Duration(10000+rand.Intn(7000)) * time.Millisecond
+	fmt.Println("Sleep after hard work for ", sleepTime)
+	time.Sleep(sleepTime) // hard work is done
 	return cmpb.Response{ID: task.ID, Res: sum}
 }
 
 func (worker *Worker) getManagerInfo() {
 	worker.mutex.Lock()
-	conn, err := worker.operListener.Accept()
-	if err != nil {
-		// handle error
-	}
+	//conn, err := worker.operListener.Accept()
+	// if err != nil {
+	// 	// handle error
+	// }
 	buffer := make([]byte, 1024)
-	bytesRead, _ := conn.Read(buffer)
+	bytesRead, _ := worker.ConnToOper.Read(buffer)
 	var msg cmpb.ReplyToConnect
 	proto.Unmarshal(buffer[:bytesRead], &msg)
 	worker.Config.IsManager = true
@@ -144,6 +151,7 @@ func (worker *Worker) getManagerInfo() {
 }
 
 func (worker *Worker) ExecWorker(stopCtx context.Context, changeToManagerCtx context.Context, changeToManagerCancel context.CancelFunc) {
+	fmt.Println("ExecWorker  func")
 	go worker.ConnectToOper(stopCtx, changeToManagerCancel)
 	go worker.GettingTask(stopCtx, changeToManagerCtx)
 
