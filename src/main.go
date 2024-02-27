@@ -1,7 +1,7 @@
 package main
 
 import (
-	"container/list"
+	//"container/list"
 	"fmt"
 )
 
@@ -23,8 +23,9 @@ func main() {
 	// for key, val := range dict {
 	// 	fmt.Printf("key: %d\tval: %s\n", key, val)
 	// }
-	l := list.New()
-	l.PushBack(MyStruct{S: "Hi", I: 5})
-	elem := l.Back()
-	fmt.Println(MyStruct(elem.Value.(MyStruct)).I, MyStruct(elem.Value.(MyStruct)).S)
+	// 	l := list.New()
+	// 	l.PushBack(MyStruct{S: "Hi", I: 5})
+	// 	elem := l.Back()
+	// 	fmt.Println(MyStruct(elem.Value.(MyStruct)).I, MyStruct(elem.Value.(MyStruct)).S)
+	fmt.Println(string([]byte{49, 50, 55, 46, 48, 46, 48, 46, 49}))
 }

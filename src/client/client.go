@@ -53,7 +53,7 @@ func main() {
 	client := pb.NewOperatorClient(conn)
 
 	reader := bufio.NewScanner(os.Stdin)
-
+	var requestCount int32
 	for reader.Scan() {
 		var input string = reader.Text()
 		if input == "quit" || input == "exit" {
@@ -64,8 +64,9 @@ func main() {
 			log.Println("Failed to read inputed data")
 			continue
 		}
-		fmt.Println(array)
-		go func() {
+		requestCount++
+		fmt.Println(requestCount, array)
+		go func(req int32) {
 			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
 
 			if err != nil {
@@ -75,9 +76,9 @@ func main() {
 				// fmt.Println("Try again?")
 				// вынести подключение в отдельную функцию
 			} else {
-				fmt.Println(response)
+				fmt.Println(req, " - ", response)
 			}
-		}()
+		}(requestCount)
 	}
 
 	fmt.Println("Client stopped working")

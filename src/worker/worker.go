@@ -41,14 +41,15 @@ type ConfigStruct struct {
 }
 
 type Worker struct {
-	Config      ConfigWorker
-	ManagerHost string
-	ManagerPort string // worker dials and sends responses to the manager on this port
-	//operListener net.Listener
-	ConnToOper net.Conn
-	TasksDone  int32
-	MyID       WorkerID
-	mutex      sync.Mutex
+	Config          ConfigWorker
+	ManagerHost     string
+	ManagerPort     string // worker dials and sends responses to the manager on this port
+	operListener    net.Listener
+	ConnToOper      net.Conn
+	TasksCount      int32
+	MyID            WorkerID
+	mutex           sync.Mutex
+	managerListener net.Listener
 }
 
 func (worker *Worker) Exec(stopCtx context.Context) {
@@ -61,6 +62,7 @@ func (worker *Worker) Exec(stopCtx context.Context) {
 		worker.ExecWorker(stopCtx, changeToManagerCtx, changeToManagerCancel)
 		if stopCtx.Err() != context.Canceled {
 			if changeToManagerCtx.Err() == context.Canceled {
+				fmt.Println("switching to manager")
 				worker.ExecManager(stopCtx)
 			}
 		}
@@ -77,9 +79,9 @@ func main() {
 		configData.IsManager = true
 	}
 	var worker Worker = Worker{}
-	operListener, err := net.Listen("tcp", "localhost:"+configData.ListenOperatorOn)
+	worker.operListener, err = net.Listen("tcp", configData.Host+":"+configData.ListenOperatorOn)
 	utils.HandleError(err, "Failed to listen port "+configData.ListenOperatorOn)
-	defer operListener.Close()
+	defer worker.operListener.Close()
 	message, _ := proto.Marshal(&cmpb.RequestToConnect{
 		ListenOperatorOn: configData.ListenOperatorOn,
 		IsManager:        configData.IsManager,
@@ -103,11 +105,11 @@ func main() {
 		utils.HandleError(err, "Failed to send message")
 		// for {
 		buffer := make([]byte, 1024)
-		worker.ConnToOper, err = operListener.Accept()
+		worker.ConnToOper, err = worker.operListener.Accept()
 		if err != nil {
 			fmt.Println("Failed to read response from operator")
 		}
-		defer worker.ConnToOper.Close()
+		// defer worker.ConnToOper.Close()
 		bytesRead, err := worker.ConnToOper.Read(buffer)
 		utils.HandleError(err, "Failed to read reply from operator")
 		var reply cmpb.ReplyToConnect
@@ -124,6 +126,7 @@ func main() {
 			worker.ManagerPort = reply.ManagerPort
 			worker.Config.OperatorPort = reply.OperPort
 			id, _ := uuid.Parse(reply.ID)
+			fmt.Println(id.String())
 			worker.MyID = WorkerID(id)
 			if configData.IsManager && !reply.IsManager {
 				log.Println(reply.Msg)
