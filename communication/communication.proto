@@ -8,6 +8,7 @@ message RequestToConnect {
     string ListenOperatorOn = 1;
     bool IsManager = 2;
     string ListenOn = 4;
+    bool AfterOperLost = 5;
 }
 
 message ReplyToConnect {

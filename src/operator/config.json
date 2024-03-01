@@ -3,5 +3,6 @@
     "Port": "50051",
     "ListenWorkersOn": "9090",
     "ListenManagerOn": "8003",
+    "CheckTime": 1000,
     "MaxTasks": 1000
 }
