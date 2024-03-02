@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	pb "github.com/YanDanilin/ParallelProg/protobuf"
 	"github.com/YanDanilin/ParallelProg/utils"
@@ -61,23 +62,35 @@ func main() {
 		}
 		array, err := readArray(input)
 		if err != nil {
-			log.Println("Failed to read inputed data")
+			log.Println("Failed to read input data")
 			continue
 		}
 		requestCount++
 		fmt.Println(requestCount, array)
 		go func(req int32) {
-			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
-			
-			if err != nil {
+			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array, Again: false})
+
+			for err != nil {
 				log.Println("Connection to operator lost")
 				// log.Printf("Error: %v", err)
-
-				// fmt.Println("Try again?")
-				// вынести подключение в отдельную функцию
-			} else {
-				fmt.Println(req, " - ", response.Sum)
+				time.Sleep(3 * time.Second)
+				fmt.Println("Trying again task: ", array)
+				// reader.Scan()
+				// answer := reader.Text()
+				// if strings.ToLower(answer) == "y" {
+				response, err = client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array, Again: true})
+				// } else if strings.ToLower(answer) == "n" {
+				// 	fmt.Println("Next request")
+				// 	break
+				// } else {
+				// 	fmt.Println("Wrong answer")
+				// 	break
+				// }
 			}
+			//if err == nil {
+			fmt.Println(req, " - ", response)
+			//}
+
 		}(requestCount)
 	}
 

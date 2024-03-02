@@ -25,7 +25,6 @@ var roleFlag = flag.String("role", "worker", "set role of worker ['worker' | 'ma
 type WorkerID uuid.UUID
 
 type ConfigWorker struct {
-	// ID               WorkerID // unique id of worker made by operator
 	OperatorHost     string // worker will connect these host and port to send a request to connect ot server
 	OperatorPort     string
 	Host             string // where the worker works

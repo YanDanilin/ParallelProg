@@ -1,24 +1,16 @@
 package main
 
 import (
+	"context"
+	"fmt"
+	"log"
+	"math/rand"
 	"net"
 	"strconv"
-
-	// "os"
-	// "os/signal"
-	// "syscall"
-	"fmt"
-	"math/rand"
 	"time"
 
-	// "os"
-	// "log"
-	"context"
-	// "container/list"
-
 	cmpb "github.com/YanDanilin/ParallelProg/communication"
-	// "github.com/YanDanilin/ParallelProg/utils"
-	// "github.com/google/uuid"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -76,6 +68,8 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 			worker.ManagerHost = msg.ManagerHost
 			worker.ManagerPort = msg.ManagerPort
 			worker.mutex.Unlock()
+		} else {
+			log.Println(typeCheck)
 		}
 		// } else if msg.Type == typeMInfo {
 		// 	worker.mutex.Lock()
@@ -106,6 +100,7 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 	fmt.Println("Listening")
 	defer func() {
 		if ctx.Err() == context.Canceled {
+			fmt.Println("GettingTasks: closed managerListener")
 			worker.managerListener.Close()
 		}
 	}()
@@ -114,6 +109,7 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 		//if err != nil {
 		if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
 			//conn.Close()
+			fmt.Println("GettingTask: finished")
 			return
 		}
 		// handle error
@@ -201,7 +197,6 @@ func (worker *Worker) getManagerInfo() {
 		proto.Unmarshal(buffer[:bytesRead], &msg)
 		if msg.Type == typeMInfo {
 			fmt.Println(msg.Type)
-			// worker.Config.IsManager = true
 			worker.Config.OperatorPort = msg.OperPort
 			worker.ManagerPort = worker.Config.ListenOn
 			worker.ManagerHost = worker.Config.Host

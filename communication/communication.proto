@@ -7,8 +7,7 @@ option go_package="github.com/YanDanilin/ParallelProg/communication";
 message RequestToConnect {
     string ListenOperatorOn = 1;
     bool IsManager = 2;
-    string ListenOn = 4;
-    bool AfterOperLost = 5;
+    string ListenOn = 3;
 }
 
 message ReplyToConnect {
@@ -39,8 +38,10 @@ message OperToManager {
     string ID = 2;
     string WorkerHost = 3;
     string WorkerListenOn = 4;
-    bool IsBusy = 5;
-    string TaskID = 6;
+    string WorkerListenOperatorOn = 5;
+    bool IsBusy = 6;
+    string TaskID = 7;
+    bool AfterRecovering = 8;
 }
 
 message OperWorker {
