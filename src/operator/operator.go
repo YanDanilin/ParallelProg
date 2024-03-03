@@ -114,7 +114,6 @@ func (operServer *operator) SendTaskToManager(task *cmpb.Task) { // func is call
 	msg, _ := proto.Marshal(task)
 	for {
 		operServer.mutex.Lock()
-		fmt.Println("here")
 		if operServer.Info.ManagerID == WorkerID(uuid.Nil) {
 			operServer.mutex.Unlock()
 			log.Println("SendTaskToManager: No manager yet")
@@ -137,11 +136,28 @@ func (operServer *operator) ProcessRequest(ctx context.Context, request *pb.Requ
 	log.Println("Client requested for summing", request.Array)
 	var sum int64 = 0
 	var id TaskID
-	if !request.Again {
-		id = operServer.AddTask(request.Array)
-		operServer.SendTaskToManager(operServer.Tasks[id].Task)
-		fmt.Println("Task sent")
-	}
+	//if !request.Again {
+	id = operServer.AddTask(request.Array)
+	operServer.SendTaskToManager(operServer.Tasks[id].Task)
+	fmt.Println("Task sent")
+	// } else {
+	// 	// for {
+	// 	// 	operServer.mutex.Lock()
+	// 	// 	if !operServer.AfterRecovering {
+	// 	// 		operServer.mutex.Unlock()
+	// 	// 		break
+	// 	// 	}
+	// 	// 	operServer.mutex.Unlock()
+	// 	// }
+	// 	for idT, tInfo := range operServer.TasksAfterRecovering {
+	// 		if utils.Equal(tInfo.Task.Array, request.Array) {
+	// 			id = idT
+	// 			fmt.Println("task found after recovering")
+	// 			break
+	// 		}
+	// 	}
+	// 	fmt.Println(uuid.UUID(id).String())
+	// }
 	for {
 		operServer.responseMutex.Lock()
 		if response, isIn := operServer.Responses[id]; isIn {
@@ -169,24 +185,6 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 	operServer.ListeningConnToManager, _ = operServer.ManagerListener.Accept()
 	defer operServer.ListeningConnToManager.Close()
 	for {
-		// if err != nil {
-		// 	if ctx.Err() == context.Canceled {
-		// 		return
-		// 	}
-		// 	log.Println("Listening failed") // может ли здесь вылезти ошибка, если менеджер умрет
-		// 	// handle error
-		// }
-		// defer conn.Close()
-		// select {
-		// case <-operServer.changedManager:
-		// 	operServer.ManagerListener, err1 = net.Listen("tcp", operServer.ConfigData.Host+":"+operServer.ConfigData.ListenManagerOn)
-		// 	if err1 != nil {
-		// 		log.Fatalln("Failed to listen manager")
-		// 	}
-		// 	fmt.Println("Listening manager")
-		// 	conn, _ := operServer.ManagerListener.Accept()
-		// 	defer conn.Close()
-		// default:
 		buffer := make([]byte, 1024)
 		bytesRead, err := operServer.ListeningConnToManager.Read(buffer)
 		if err != nil {
@@ -199,6 +197,7 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 		var respMsg cmpb.OperToManager
 		proto.Unmarshal(buffer[:bytesRead], &respMsg)
 		if !respMsg.AfterRecovering {
+			operServer.AfterRecovering = false
 			response := new(cmpb.Response)
 			proto.Unmarshal(buffer[:bytesRead], response) // принимать сообщение о занятости воркера
 			fmt.Println("ListenManager: ", respMsg.Type)
@@ -223,13 +222,17 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 				operServer.mutex.Unlock()
 				operServer.responseMutex.Lock()
 				operServer.Responses[TaskID(id)] = response
+				fmt.Println("ListenManager: response received: ", response.Res)
 				operServer.responseMutex.Unlock()
 			}
 		} else {
-			fmt.Println("ListenManager: ", respMsg.Type)
-			operServer.mutex.Lock()
-			operServer.afterRecovering()
-			operServer.mutex.Unlock()
+			fmt.Println("afterRecovering!")
+			// operServer.AfterRecovering = true
+			// fmt.Println("ListenManager: ", respMsg.Type)
+			// operServer.mutex.Lock()
+			// operServer.afterRecovering()
+			// operServer.mutex.Unlock()
+			// operServer.AfterRecovering = false
 		}
 	}
 }
@@ -446,15 +449,25 @@ func (operServer *operator) handleWorker(conn net.Conn) error {
 	return err
 }
 
+// ping workers and manager every second to check if they alive
 func (operServer *operator) CheckWorkers(stopCtx context.Context, checkTime time.Duration) {
 	timer := time.NewTimer(checkTime)
 	for {
 		<-timer.C
 		timer.Stop()
+		// for {
+		// 	operServer.mutex.Lock()
+		// 	if !operServer.AfterRecovering {
+		// 		operServer.mutex.Unlock()
+		// 		break
+		// 	}
+		// 	operServer.mutex.Unlock()
+		// }
 		if len(operServer.Info.Workers) != 0 {
 			//operServer.mutex.Lock()
 			for _, configWorker := range operServer.Info.Workers {
 				if configWorker.ID != operServer.Info.ManagerID {
+					fmt.Println("checkWorkers: check worker ", uuid.UUID(configWorker.ID).String())
 					conn, err := net.Dial("tcp", configWorker.Host+":"+configWorker.ListenOperatorOn)
 					if err != nil {
 						operServer.mutex.Lock()
@@ -492,6 +505,7 @@ func (operServer *operator) CheckWorkers(stopCtx context.Context, checkTime time
 	}
 }
 
+// sending all workers info anbout new manager and sending tasks to new manager
 func (operServer *operator) distribute() {
 	// for _, task := range operServer.Tasks {
 	// 	fmt.Println(task.Task.Array)
@@ -543,6 +557,7 @@ func (operServer *operator) distribute() {
 	operServer.ConnToManager.Write(msg)
 }
 
+// if manager is dead, this function is called to choose new manager
 func (operServer *operator) chooseManager() {
 	for len(operServer.Info.Workers) == 0 {
 		log.Println("chooseManager: No workers")
@@ -637,6 +652,7 @@ func main() {
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	ctxW, cancelW := context.WithCancel(context.Background())
 	ctxM, cancelM := context.WithCancel(context.Background())
+	//operServer.AfterRecovering = true
 	go operServer.AcceptingWorkers(ctxW, workerListener)
 	// operServer.ConnectToManager(&operServer.mutex)
 

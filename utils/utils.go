@@ -32,3 +32,15 @@ func DecodeConfigJSON(configFilePath string, val interface{}) error {
 	err = json.Unmarshal(dataFromFile, val)
 	return err
 }
+
+func Equal(a, b []int32) bool {
+    if len(a) != len(b) {
+        return false
+    }
+    for i, v := range a {
+        if v != b[i] {
+            return false
+        }
+    }
+    return true
+}
