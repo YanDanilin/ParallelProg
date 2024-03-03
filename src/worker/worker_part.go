@@ -125,14 +125,18 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 		if err != nil {
 			if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
 				//conn.Close()
-				//fmt.Println("GettingTask: finished")
 				return
 			}
 			// handle error
-			worker.managerListener.Close()
-			worker.managerListener, _ = net.Listen("tcp", worker.Config.Host+":"+worker.Config.ListenOn)
+			// worker.managerListener.Close()
+			// worker.managerListener, _ = net.Listen("tcp", worker.Config.Host+":"+worker.Config.ListenOn)
 			fmt.Println("GettingTask: ", err)
 			continue
+		}
+		if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
+			conn.Close()
+			//fmt.Println("GettingTask: finished")
+			return
 		}
 		fmt.Println("GettingTask: Accepted")
 		buffer := make([]byte, 1024)
@@ -147,6 +151,9 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 		}
 		task := cmpb.Task{}
 		proto.Unmarshal(buffer[:bytesRead], &task)
+		if len(task.Array) == 0 {
+			continue
+		}
 		fmt.Println("GettingTask: task is ready to be done")
 		worker.TasksCount++
 		response := worker.processingTask(&task)
@@ -164,6 +171,7 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 				} else {
 					time.Sleep(100 * time.Millisecond)
 				}
+				fmt.Println("GettingTask:", err)
 				continue
 			}
 			connToManager.SetReadDeadline(time.Now().Add(time.Second))

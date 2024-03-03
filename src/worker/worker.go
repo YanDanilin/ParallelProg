@@ -150,4 +150,5 @@ func main() {
 
 	<-stop
 	stopCancel()
+	fmt.Println("Worker stopped")
 }

@@ -60,6 +60,7 @@ func (manager *Manager) tryConnect() (err error) {
 
 func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 	log.Println("Conn to oper")
+	plug := []byte("p")
 	//conn, err := manager.Worker.operListener.Accept()
 	for {
 		if stopCtx.Err() == context.Canceled {
@@ -84,8 +85,7 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 			manager.Worker.mutex.Lock()
 			manager.Tasks.PushBack(task)
 			fmt.Println("ConnectToOper: task added ", task.Array)
-			//msg := []byte("")
-			//manager.Worker.ConnToOper.Write(msg)
+			manager.Worker.ConnToOper.Write(plug)
 			manager.Worker.mutex.Unlock()
 		} else {
 			log.Println(workerInfo.Type)
@@ -107,6 +107,7 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 					fmt.Println("ConnectToOper: busy worker", idW)
 					manager.BusyWorkers[TaskID(tID)] = idW //wInfo
 				}
+				manager.Worker.ConnToOper.Write(plug)
 				manager.Worker.mutex.Unlock()
 			} else if workerInfo.Type == typeWorkerDead {
 				fmt.Println(workerInfo.Type)
@@ -203,7 +204,17 @@ func (manager *Manager) SendTaskToWorker(stopCtx context.Context) {
 				manager.BusyWorkers[TaskID(taskID)] = id //manager.WorkersInfo[id]
 				delete(manager.FreeWorkers, id)
 				msg, _ = proto.Marshal(&cmpb.OperToManager{Type: typeBusy, ID: uuid.UUID(id).String(), TaskID: taskID.String()})
-				manager.ConnToOper.Write(msg)
+				// manager.ConnToOper.Write(msg)
+				for {
+					manager.ConnToOper.Write(msg) // response written
+					manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+					plug := make([]byte, 1)
+					_, err := manager.ConnToOper.Read(plug)
+					if err == nil {
+						manager.ConnToOper.SetReadDeadline(time.Time{})
+						break
+					}
+				}
 				manager.Worker.mutex.Unlock()
 			} else {
 				manager.Worker.mutex.Unlock()
@@ -290,6 +301,7 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 			plug := make([]byte, 1)
 			_, err = manager.ConnToOper.Read(plug)
 			if err == nil {
+				manager.ConnToOper.SetReadDeadline(time.Time{})
 				break
 			}
 		}
@@ -313,8 +325,17 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 		manager.WorkersInfo[WorkerID(wID)].OperToManager.TaskID = ""
 		delete(manager.BusyWorkers, TaskID(uuID))
 		msg, _ := proto.Marshal(&cmpb.OperToManager{Type: typeFree, ID: wID.String()}) //wInfo.OperToManager.ID}) //uuid.UUID(wID).String()})
-
-		manager.ConnToOper.Write(msg)
+		//manager.ConnToOper.Write(msg)
+		for {
+			manager.ConnToOper.Write(msg) // response written
+			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+			plug := make([]byte, 1)
+			_, err = manager.ConnToOper.Read(plug)
+			if err == nil {
+				manager.ConnToOper.SetReadDeadline(time.Time{})
+				break
+			}
+		}
 		manager.Worker.mutex.Unlock()
 	}
 }
@@ -366,7 +387,7 @@ func (worker *Worker) ExecManager(stopCtx context.Context) {
 					manager.WorkersInfo[idW].Task = task
 				}
 				fmt.Println("ExecManager: task added ", task.ID, task.Array)
-				msg := []byte("a")
+				msg := []byte("p")
 				manager.Worker.ConnToOper.Write(msg)
 				fmt.Println("ExecManager: written")
 				manager.Worker.mutex.Unlock()
@@ -393,6 +414,8 @@ func (worker *Worker) ExecManager(stopCtx context.Context) {
 						fmt.Println("ExecManager: busy: ", uuid.UUID(idW).String())
 						manager.BusyWorkers[TaskID(tID)] = idW //wInfo
 					}
+					msg := []byte("p")
+					manager.Worker.ConnToOper.Write(msg)
 					manager.Worker.mutex.Unlock()
 				} else if workerInfo.Type == typeReady {
 					break

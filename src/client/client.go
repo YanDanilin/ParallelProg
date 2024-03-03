@@ -76,7 +76,7 @@ func main() {
 				// fmt.Println("Try again?")
 				// вынести подключение в отдельную функцию
 			} else {
-				fmt.Println("  ", req, "-", response.Sum)
+				fmt.Println("  ", req, "-", response)
 			}
 		}(requestCount)
 	}
