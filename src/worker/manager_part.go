@@ -1,26 +1,18 @@
 package main
 
 import (
+	"container/list"
+	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"time"
 
-	// "os"
-	// "os/signal"
-	// "syscall"
-	// "time"
-	"container/list"
-	"context"
-	"log"
-
-	//"math/rand"
-
 	cmpb "github.com/YanDanilin/ParallelProg/communication"
 	"github.com/YanDanilin/ParallelProg/utils"
-
-	// "github.com/YanDanilin/ParallelProg/utils"
 	"github.com/google/uuid"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -70,24 +62,18 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 	log.Println("Conn to oper")
 	//conn, err := manager.Worker.operListener.Accept()
 	for {
-		// if err != nil {
-		// 	// handle error
-		// 	fmt.Println(err, "connToOper func")
-		// 	if stopCtx.Err() == context.Canceled {
-		// 		return
-		// 	}
-		// }
-		// fmt.Println("Accepted")
+		if stopCtx.Err() == context.Canceled {
+			return
+		}
 		buffer := make([]byte, 1024)
 		bytesRead, err := manager.Worker.ConnToOper.Read(buffer)
 		for err != nil {
-			// handle error
 			if stopCtx.Err() == context.Canceled {
 				return
 			}
 			log.Println("Connection to operator lost")
-			time.Sleep(5 * time.Second)
-			err = manager.tryConnect()
+			time.Sleep(3 * time.Second)
+			//err = manager.tryConnect()
 			//utils.HandleError(err, "Connection to opeator lost")
 		}
 		workerInfo := new(cmpb.OperToManager)
@@ -118,7 +104,7 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 				if !workerInfo.IsBusy {
 					manager.FreeWorkers[idW] = struct{}{}
 				} else {
-					fmt.Println("ConnectToOper: ", idW)
+					fmt.Println("ConnectToOper: busy worker", idW)
 					manager.BusyWorkers[TaskID(tID)] = idW //wInfo
 				}
 				manager.Worker.mutex.Unlock()
@@ -211,7 +197,9 @@ func (manager *Manager) SendTaskToWorker(stopCtx context.Context) {
 				fmt.Println("SendTaskToWorker: task sent ", task.Array)
 				manager.Worker.mutex.Lock()
 				manager.WorkersInfo[id].Task = task
+				manager.WorkersInfo[id].OperToManager.IsBusy = true
 				taskID, _ := uuid.Parse(task.ID)
+				manager.WorkersInfo[id].OperToManager.TaskID = task.ID
 				manager.BusyWorkers[TaskID(taskID)] = id //manager.WorkersInfo[id]
 				delete(manager.FreeWorkers, id)
 				msg, _ = proto.Marshal(&cmpb.OperToManager{Type: typeBusy, ID: uuid.UUID(id).String(), TaskID: taskID.String()})
@@ -227,66 +215,92 @@ func (manager *Manager) SendTaskToWorker(stopCtx context.Context) {
 func (manager *Manager) GetResponses(stopCtx context.Context) {
 	var err error
 	fmt.Println("GetResponses: started")
-	manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
-	if err != nil {
-		// handle error
-		if stopCtx.Err() == context.Canceled {
-			return
+	// manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
+	// if err != nil {
+	// 	// handle error
+	// 	if stopCtx.Err() == context.Canceled {
+	// 		return
+	// 	}
+	// 	fmt.Println("GetResponses: ", err)
+	// 	if err.Error() == "listen tcp "+manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort+": bind: address already in use" {
+	// 		manager.Worker.managerListener.Close()
+	// 		manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
+	// 		fmt.Println("GetResponse: ", err)
+	// 	}
+	// }
+	if manager.Worker.Config.IsManager {
+		manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
+		for err != nil {
+			// handle error
+			if stopCtx.Err() == context.Canceled {
+				return
+			}
+			fmt.Println("GetResponses: ", err)
+			if err.Error() == "listen tcp "+manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort+": bind: address already in use" {
+				manager.Worker.managerListener.Close()
+				time.Sleep(time.Second)
+				manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
+				fmt.Println("GetResponse: ", err)
+			}
 		}
-		fmt.Println("GetResponses: ", err)
-		if err.Error() == "listen tcp "+manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort+": bind: address already in use" {
-			manager.Worker.managerListener.Close()
-			manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
-			fmt.Println("GetResponse: ", err)
+	} else {
+		manager.Worker.managerListener.Close()
+		manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
+		if err != nil {
+			fmt.Println("GetResponses: (not manager listening)", err)
 		}
 	}
-	fmt.Println("GetResponses: ", "Listening responses")
+	fmt.Println("GetResponses: Listening responses")
 	fmt.Println("GetResponses: ", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
 	defer manager.Worker.managerListener.Close()
 	for {
 		if stopCtx.Err() == context.Canceled {
 			return
 		}
-		fmt.Println("GetResponses: ", "waiting for response")
+		fmt.Println("GetResponses: waiting for response")
 		conn, err := manager.Worker.managerListener.Accept()
 		if err != nil {
 			if stopCtx.Err() == context.Canceled {
 				return
 			}
 			/// handle error
+			fmt.Println("GetResponse: after accept ", err)
+			continue
 		}
-		defer conn.Close()
+		//defer conn.Close()
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
 		if err != nil {
 			if stopCtx.Err() == context.Canceled {
 				return
 			}
+			conn.Close()
+			fmt.Println("GetResponse: failed to read")
 			continue
 			//utils.HandleError(err, "GetResponse: Failed to read response") // REDO
 			//handle error
 
 		}
-		manager.ConnToOper.Write(buffer[:bytesRead]) // response written
+		plug := []byte("p")
+		conn.Write(plug)
+		conn.Close()
+		for {
+			manager.ConnToOper.Write(buffer[:bytesRead]) // response written
+			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+			plug := make([]byte, 1)
+			_, err = manager.ConnToOper.Read(plug)
+			if err == nil {
+				break
+			}
+		}
+		fmt.Println("GetResponse: response written to operator")
 		response := new(cmpb.Response)
 		proto.Unmarshal(buffer[:bytesRead], response)
 		uuID, _ := uuid.Parse(response.ID)
 		manager.Worker.mutex.Lock()
 		fmt.Println("GetResponse: ", response.ID)
 		wInfo := manager.BusyWorkers[TaskID(uuID)]
-		//manager.Worker.mutex.Unlock()
-		// for !isIn {
-		// 	fmt.Println("GetResponses: cycle ", response.ID)
-		// 	manager.Worker.mutex.Lock()
-		// 	wInfo, isIn = manager.BusyWorkers[TaskID(uuID)]
-		// 	manager.Worker.mutex.Unlock()
-		// 	time.Sleep(100 * time.Millisecond)
-		// }
-		//manager.Worker.mutex.Lock()
-		//if isIn {
 		var wID uuid.UUID = uuid.UUID(wInfo)
-		//if wInfo != nil {
-		//wID = uuid.UUID(wInfo) //, err = uuid.Parse(wInfo)//wInfo.OperToManager.ID)
 		if err != nil {
 			fmt.Println("GetResponse:", err)
 		}
@@ -295,18 +309,13 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 			manager.FreeWorkers[WorkerID(wID)] = struct{}{}
 			manager.WorkersInfo[WorkerID(wID)].Task = nil
 		}
+		manager.WorkersInfo[WorkerID(wID)].OperToManager.IsBusy = false
+		manager.WorkersInfo[WorkerID(wID)].OperToManager.TaskID = ""
 		delete(manager.BusyWorkers, TaskID(uuID))
-		//} else {
-		// wID = uuid.UUID(manager.Worker.MyID)
-		//}
 		msg, _ := proto.Marshal(&cmpb.OperToManager{Type: typeFree, ID: wID.String()}) //wInfo.OperToManager.ID}) //uuid.UUID(wID).String()})
 
 		manager.ConnToOper.Write(msg)
-		//}
 		manager.Worker.mutex.Unlock()
-		// go func() {
-		//manager.ConnToOper.Write(buffer[:bytesRead])
-		// }()
 	}
 }
 
@@ -337,7 +346,9 @@ func (worker *Worker) ExecManager(stopCtx context.Context) {
 				}
 				log.Println("ExecManager: Connection to operator lost")
 				time.Sleep(5 * time.Second)
-				err = manager.tryConnect()
+				continue
+				//err = manager.tryConnect()
+				//manager.ConnToOper, err = net.Dial("tcp", worker.Config.OperatorHost+":"+worker.Config.OperatorPort)
 				//utils.HandleError(err, "Connection to opeator lost")
 			}
 			workerInfo := new(cmpb.OperToManager)
@@ -366,16 +377,18 @@ func (worker *Worker) ExecManager(stopCtx context.Context) {
 				if workerInfo.Type == typeInfo {
 					tID, _ := uuid.Parse(workerInfo.TaskID)
 					manager.Worker.mutex.Lock()
-					if idW != manager.Worker.MyID {
-						wInfo := new(WInfo)
-						wInfo.OperToManager = workerInfo
-						wInfo.Task = nil
-						manager.WorkersInfo[idW] = wInfo
-						manager.WorkersCount++
-					}
+					//if idW != manager.Worker.MyID {
+					wInfo := new(WInfo)
+					wInfo.OperToManager = workerInfo
+					wInfo.Task = nil
+					manager.WorkersInfo[idW] = wInfo
+					manager.WorkersCount++
+					//}
 					if !workerInfo.IsBusy {
-						fmt.Println("ExecManager: free: ", uuid.UUID(idW).String())
-						manager.FreeWorkers[idW] = struct{}{}
+						if idW != manager.Worker.MyID {
+							fmt.Println("ExecManager: free: ", uuid.UUID(idW).String())
+							manager.FreeWorkers[idW] = struct{}{}
+						}
 					} else {
 						fmt.Println("ExecManager: busy: ", uuid.UUID(idW).String())
 						manager.BusyWorkers[TaskID(tID)] = idW //wInfo

@@ -1,24 +1,18 @@
 package main
 
 import (
+	"context"
+	"fmt"
+
+	//"log"
+	"math/rand"
 	"net"
 	"strconv"
-
-	// "os"
-	// "os/signal"
-	// "syscall"
-	"fmt"
-	"math/rand"
 	"time"
 
-	// "os"
-	// "log"
-	"context"
-	// "container/list"
-
 	cmpb "github.com/YanDanilin/ParallelProg/communication"
-	// "github.com/YanDanilin/ParallelProg/utils"
-	// "github.com/google/uuid"
+	"github.com/YanDanilin/ParallelProg/utils"
+
 	"google.golang.org/protobuf/proto"
 )
 
@@ -42,6 +36,7 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 				return
 			}
 			// handle error
+			fmt.Println("ConnectToOper: Connection lost", err)
 		}
 		// defer conn.Close()
 		buffer := make([]byte, 1024)
@@ -51,21 +46,21 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 				return
 			}
 			// handle error CONNECTION TO OPERATOR LOST !!!
+			fmt.Println("ConnectToOper: Failed to read", err)
 		}
 		var msg cmpb.ReplyToConnect
 		proto.Unmarshal(buffer[:bytesRead], &msg)
 		fmt.Println(msg.Type)
 		if msg.Type == typeOrder {
-			// become manager mb with contex? cancel?
 			fmt.Println("order to become manager")
 			worker.ConnToOper = conn
 			conn.Write(buffer[:bytesRead])
-			worker.managerListener.Close()
+			// worker.managerListener.Close()
 			changeToManager()
 			//conn.Close()
 			return
-		} else if msg.Type == typeCheck {
-			worker.ConnToOper.Write(buffer[:bytesRead])
+			// } else if msg.Type == typeCheck {
+			//worker.ConnToOper.Write(buffer[:bytesRead])
 		} else if msg.Type == typeTime {
 			msg.Msg = strconv.FormatInt(int64(worker.TasksCount), 10)
 			reply, _ := proto.Marshal(&msg)
@@ -77,6 +72,9 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 			worker.ManagerPort = msg.ManagerPort
 			worker.mutex.Unlock()
 		}
+		// } else {
+		// 	log.Println(typeCheck)
+		// }
 		// } else if msg.Type == typeMInfo {
 		// 	worker.mutex.Lock()
 		// 	worker.Config.IsManager = true
@@ -93,37 +91,41 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 }
 
 func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx context.Context) {
-	defer fmt.Println("func is returned")
+	defer fmt.Println("GettingTask: func is returned")
 	var err error
 	worker.managerListener, err = net.Listen("tcp", worker.Config.Host+":"+worker.Config.ListenOn)
 	if err != nil {
 		if ctx.Err() == context.Canceled {
 			return
 		}
+		utils.HandleError(err, "GettingTask: Failed to listen port")
 		// handle error
 	}
 	fmt.Println(worker.Config.Host + ":" + worker.Config.ListenOn)
-	fmt.Println("Listening")
+	fmt.Println("GettingTask: listening")
 	defer func() {
 		if ctx.Err() == context.Canceled {
+			fmt.Println("GettingTasks: close managerListener")
 			worker.managerListener.Close()
 		}
 	}()
 	for {
-		fmt.Println("getting task func")
+		fmt.Println("GettingTask: new cycle")
 		//if err != nil {
 		if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
 			//conn.Close()
+			//fmt.Println("GettingTask: finished")
 			return
 		}
 		// handle error
 		//continue
 		//}
 		conn, err := worker.managerListener.Accept()
-		fmt.Println("Accepted")
+
 		if err != nil {
 			if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
 				//conn.Close()
+				//fmt.Println("GettingTask: finished")
 				return
 			}
 			// handle error
@@ -132,24 +134,26 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 			fmt.Println("GettingTask: ", err)
 			continue
 		}
+		fmt.Println("GettingTask: Accepted")
 		buffer := make([]byte, 1024)
 		bytesRead, err := conn.Read(buffer)
 		if err != nil {
 			if ctx.Err() == context.Canceled || changeToManagerCtx.Err() == context.Canceled {
-				conn.Close()
+				// conn.Close()
 				return
 			}
 			// handle error
+			continue
 		}
 		task := cmpb.Task{}
 		proto.Unmarshal(buffer[:bytesRead], &task)
-		fmt.Println("Task is ready to be done")
+		fmt.Println("GettingTask: task is ready to be done")
 		worker.TasksCount++
 		response := worker.processingTask(&task)
 		marshaledResponse, _ := proto.Marshal(&response)
 		var connToManager net.Conn
 		for {
-			fmt.Println("sending resp")
+			fmt.Println("GettingTask: sending response")
 			worker.mutex.Lock()
 			connToManager, err = net.Dial("tcp", worker.ManagerHost+":"+worker.ManagerPort)
 			worker.mutex.Unlock()
@@ -158,14 +162,20 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 				if changeToManagerCtx.Err() == context.Canceled {
 					time.Sleep(3 * time.Second)
 				} else {
-					time.Sleep(10 * time.Millisecond)
+					time.Sleep(100 * time.Millisecond)
 				}
 				continue
 			}
-			break
+			connToManager.SetReadDeadline(time.Now().Add(time.Second))
+			connToManager.Write(marshaledResponse)
+			buf := make([]byte, 10)
+			// connToManager.SetReadDeadline(time.Now().Add(time.Second))
+			_, err = connToManager.Read(buf)
+			if err == nil {
+				break
+			}
 		}
-		connToManager.Write(marshaledResponse)
-		fmt.Println("response written")
+		fmt.Println("GettingTask: response written")
 		conn.Close()
 		connToManager.Close()
 	}
@@ -193,8 +203,8 @@ func (worker *Worker) getManagerInfo() {
 	// }
 	var buffer []byte
 	var bytesRead int
+	fmt.Println("getManagerInfo: started")
 	for {
-		fmt.Println("get manager info")
 		buffer = make([]byte, 1024)
 		bytesRead, _ = worker.ConnToOper.Read(buffer)
 		var msg cmpb.ReplyToConnect

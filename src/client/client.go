@@ -65,10 +65,10 @@ func main() {
 			continue
 		}
 		requestCount++
-		fmt.Println(requestCount, array)
+		fmt.Println(requestCount, "-", array)
 		go func(req int32) {
 			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
-			
+
 			if err != nil {
 				log.Println("Connection to operator lost")
 				// log.Printf("Error: %v", err)
@@ -76,7 +76,7 @@ func main() {
 				// fmt.Println("Try again?")
 				// вынести подключение в отдельную функцию
 			} else {
-				fmt.Println(req, " - ", response.Sum)
+				fmt.Println("  ", req, "-", response.Sum)
 			}
 		}(requestCount)
 	}
