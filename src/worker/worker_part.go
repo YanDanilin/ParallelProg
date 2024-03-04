@@ -3,8 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-
-	//"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -72,20 +70,6 @@ func (worker *Worker) ConnectToOper(stopCtx context.Context, changeToManager con
 			worker.ManagerPort = msg.ManagerPort
 			worker.mutex.Unlock()
 		}
-		// } else {
-		// 	log.Println(typeCheck)
-		// }
-		// } else if msg.Type == typeMInfo {
-		// 	worker.mutex.Lock()
-		// 	worker.Config.IsManager = true
-		// 	worker.Config.OperatorPort = msg.OperPort
-		// 	worker.ManagerPort = worker.Config.ListenOn
-		// 	worker.ManagerHost = worker.Config.Host
-		// 	//ready <- true
-		// 	worker.mutex.Unlock()
-		// 	conn.Close()
-		// 	break
-		// }
 		conn.Close()
 	}
 }

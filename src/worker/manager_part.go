@@ -54,16 +54,6 @@ func (manager *Manager) tryConnect() (err error) {
 	defer fmt.Println("tryConnect: finished")
 	fmt.Println("tryConnect: started")
 	manager.ConnToOper, err = net.Dial("tcp", manager.Worker.Config.OperatorHost+":"+manager.Worker.Config.OperatorPort)
-	// write replyToConnect
-	// if err == nil {
-	// 	msg, _ := proto.Marshal(&cmpb.OperToManager{
-	// 		WorkerListenOperatorOn: manager.Worker.Config.ListenOperatorOn,
-	// 		IsManager:        true,
-	// 		ListenOn:         manager.Worker.Config.ListenOn,
-	// 	})
-	// 	manager.Worker.ConnToOper.Write(msg)
-	// 	//отправить воркерам msg, чтоб они еще раз подключились к оператору
-	// }
 	if err != nil {
 		return err
 	}
@@ -233,8 +223,6 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 }
 
 func (manager *Manager) findFreeWorker() (net.Conn, WorkerID) {
-	//var l int
-	// manager.Worker.mutex.Lock()
 	for len(manager.FreeWorkers) == 0 {
 		select {
 		case <-manager.chansRecover.send:
@@ -245,23 +233,10 @@ func (manager *Manager) findFreeWorker() (net.Conn, WorkerID) {
 			time.Sleep(500 * time.Millisecond)
 		}
 	}
-	// num := rand.Intn(l)
-	// i := 0
 	var idRet WorkerID
 	var conn net.Conn
 	var err error
-	// Loop:
-	// 	for {
-	// 		num := rand.Intn(l)
-	// 		i := 0
-
 	manager.Worker.mutex.Lock()
-	// for len(manager.FreeWorkers) == 0 {
-	// 	manager.Worker.mutex.Unlock()
-	// 	fmt.Println("finding free worker")
-	// 	time.Sleep(5 * time.Second)
-	// 	manager.Worker.mutex.Lock()
-	// }
 	for err = errors.New("plug"); err != nil; {
 		for id := range manager.FreeWorkers {
 			// if i == num {
@@ -275,10 +250,6 @@ func (manager *Manager) findFreeWorker() (net.Conn, WorkerID) {
 			idRet = id
 			fmt.Println("findFreeWorker: free worker found")
 			break
-			// break Loop
-			// }
-			// 		i++
-			// 	}
 		}
 	}
 	manager.Worker.mutex.Unlock()
@@ -385,7 +356,6 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 			fmt.Println("GetResponse: after accept ", err)
 			continue
 		}
-		//defer conn.Close()
 		var bytesRead int
 		buffer := make([]byte, 1024)
 		select {

@@ -103,13 +103,11 @@ func main() {
 		_, err = conn.Write(message)
 		fmt.Println("msg written")
 		utils.HandleError(err, "Failed to send message")
-		// for {
 		buffer := make([]byte, 1024)
 		worker.ConnToOper, err = worker.operListener.Accept()
 		if err != nil {
 			fmt.Println("Failed to read response from operator")
 		}
-		// defer worker.ConnToOper.Close()
 		bytesRead, err := worker.ConnToOper.Read(buffer)
 		utils.HandleError(err, "Failed to read reply from operator")
 		var reply cmpb.ReplyToConnect
@@ -132,16 +130,13 @@ func main() {
 				log.Println(reply.Msg)
 			}
 			worker.Config.IsManager = reply.IsManager
-			//connToOper.Close()
 			conn.Close()
 			break
 		} else {
 			log.Println(reply.Msg)
 		}
-		//connToOper.Close()
 		conn.Close()
 	}
-	// defer conn.Close()
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	stopCtx, stopCancel := context.WithCancel(context.Background())

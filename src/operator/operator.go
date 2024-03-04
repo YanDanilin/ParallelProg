@@ -179,7 +179,6 @@ func (operServer *operator) ListenManager(ctx context.Context) {
 		<-ctx.Done()
 	}() // сюда передается отдельный контекст, так что здесь можно вычитывать
 	var err1 error
-	//var conn net.Conn
 	operServer.ManagerListener, err1 = net.Listen("tcp", operServer.ConfigData.Host+":"+operServer.ConfigData.ListenManagerOn)
 	if err1 != nil {
 		log.Fatalln("ListenManager: Failed to listen manager")
