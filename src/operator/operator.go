@@ -355,7 +355,9 @@ func (operServer *operator) CheckWorkers(stopCtx context.Context, checkTime time
 							Type: typeWorkerDead,
 							ID:   uuid.UUID(configWorker.ID).String(),
 						})
+						plug := make([]byte, 1)
 						operServer.ConnToManager.Write(msg)
+						operServer.ConnToManager.Read(plug)
 						delete(operServer.Info.Workers, configWorker.ID)
 						operServer.Info.WorkersCount--
 						operServer.mutex.Unlock()
@@ -437,6 +439,7 @@ func (operServer *operator) distribute() {
 	}
 	msg, _ := proto.Marshal(&cmpb.OperToManager{Type: typeReady})
 	operServer.ConnToManager.Write(msg)
+	operServer.ConnToManager.Read(plug)
 	fmt.Println("distrinbute: Ready")
 }
 

@@ -121,6 +121,7 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 				// if _, isIn := manager.FreeWorkers[idW]; isIn {
 				delete(manager.FreeWorkers, idW)
 				// }
+				manager.Worker.ConnToOper.Write(plug)
 				manager.Worker.mutex.Unlock()
 			} else if workerInfo.Type == typeCheck {
 				continue
@@ -418,6 +419,8 @@ func (worker *Worker) ExecManager(stopCtx context.Context) {
 					manager.Worker.ConnToOper.Write(msg)
 					manager.Worker.mutex.Unlock()
 				} else if workerInfo.Type == typeReady {
+					msg := []byte("p")
+					manager.Worker.ConnToOper.Write(msg)
 					break
 				}
 			}
