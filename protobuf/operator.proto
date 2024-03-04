@@ -6,6 +6,7 @@ option go_package="github.com/YanDanilin/ParallelProg/protobuf";
 
 message RequestFromClient {
     repeated int32 array = 1;
+    bool again = 2;
 }
 
 message ResponseToClient {

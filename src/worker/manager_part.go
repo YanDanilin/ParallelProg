@@ -23,6 +23,7 @@ const (
 	typeFree       string = "[FREE]"
 	typeTask       string = "[TASK]"
 	typeReady      string = "[READY]"
+	typeRecover    string = "[RECOVER]"
 )
 
 type TaskID uuid.UUID
@@ -30,6 +31,11 @@ type TaskID uuid.UUID
 type WInfo struct {
 	OperToManager *cmpb.OperToManager
 	Task          *cmpb.Task
+}
+
+type Recover struct {
+	response chan bool
+	send     chan bool
 }
 
 type Manager struct {
@@ -40,22 +46,108 @@ type Manager struct {
 	WorkersCount int32
 	Tasks        *list.List
 	ConnToOper   net.Conn // by Dial
+	chansRecover Recover
 	// Worker.ConnToOper by listener.Accept
 }
 
 func (manager *Manager) tryConnect() (err error) {
-	manager.Worker.ConnToOper, err = net.Dial("tcp", manager.Worker.Config.OperatorHost+":"+manager.Worker.Config.OperatorPort)
+	defer fmt.Println("tryConnect: finished")
+	fmt.Println("tryConnect: started")
+	manager.ConnToOper, err = net.Dial("tcp", manager.Worker.Config.OperatorHost+":"+manager.Worker.Config.OperatorPort)
 	// write replyToConnect
-	if err == nil {
-		msg, _ := proto.Marshal(&cmpb.RequestToConnect{
-			ListenOperatorOn: manager.Worker.Config.ListenOperatorOn,
-			IsManager:        true,
-			ListenOn:         manager.Worker.Config.ListenOn,
-		})
-		manager.Worker.ConnToOper.Write(msg)
-		//отправить воркерам msg, чтоб они еще раз подключились к оператору
+	// if err == nil {
+	// 	msg, _ := proto.Marshal(&cmpb.OperToManager{
+	// 		WorkerListenOperatorOn: manager.Worker.Config.ListenOperatorOn,
+	// 		IsManager:        true,
+	// 		ListenOn:         manager.Worker.Config.ListenOn,
+	// 	})
+	// 	manager.Worker.ConnToOper.Write(msg)
+	// 	//отправить воркерам msg, чтоб они еще раз подключились к оператору
+	// }
+	if err != nil {
+		return err
 	}
-	return err
+	msg, _ := proto.Marshal(&cmpb.OperToManager{
+		Type: typeRecover,
+	})
+	plug := make([]byte, 1)
+	manager.ConnToOper.Write(msg)
+	manager.ConnToOper.Read(plug)
+	msg, _ = proto.Marshal(&cmpb.OperToManager{
+		Type:                   typeInfo,
+		WorkerHost:             manager.Worker.Config.Host,
+		WorkerListenOn:         manager.Worker.Config.ListenOn,
+		WorkerListenOperatorOn: manager.Worker.Config.ListenOperatorOn,
+		ID:                     uuid.UUID(manager.Worker.MyID).String(),
+	})
+	manager.ConnToOper.Write(msg)
+	manager.Worker.ConnToOper, _ = manager.Worker.operListener.Accept()
+	fmt.Println("tryConnect: connection accepted")
+	for idW, wInfo := range manager.WorkersInfo {
+		fmt.Println("tryConnect: sending workers info")
+		msg, _ = proto.Marshal(&cmpb.OperToManager{
+			Type:                   typeInfo,
+			WorkerHost:             wInfo.OperToManager.WorkerHost,
+			WorkerListenOperatorOn: wInfo.OperToManager.WorkerListenOperatorOn,
+			IsBusy:                 wInfo.OperToManager.IsBusy,
+			TaskID:                 wInfo.OperToManager.TaskID,
+			ID:                     uuid.UUID(idW).String(),
+		})
+		for {
+			manager.ConnToOper.Write(msg)
+			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+			_, err = manager.ConnToOper.Read(plug)
+			if err == nil {
+				break
+			}
+		}
+		fmt.Println("tryConnect: written")
+	}
+	fmt.Println("tryConnect: workers info sent")
+	msg, _ = proto.Marshal(&cmpb.OperToManager{Type: typeReady})
+	for {
+		manager.ConnToOper.Write(msg)
+		manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+		_, err = manager.ConnToOper.Read(plug)
+		if err == nil {
+			break
+		}
+	}
+	for _, idW := range manager.BusyWorkers {
+		fmt.Println("tryConnect: first cycle")
+		msg, _ := proto.Marshal(manager.WorkersInfo[idW].Task)
+		for {
+			manager.ConnToOper.Write(msg)
+			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+			_, err = manager.ConnToOper.Read(plug)
+			if err == nil {
+				break
+			}
+		}
+	}
+	fmt.Println("tryConnect: sending task")
+	for ptr := manager.Tasks.Back(); ptr != nil; ptr = ptr.Next() {
+		fmt.Println("tryConnect: second cycle")
+		msg, _ := proto.Marshal(ptr.Value.(*cmpb.Task))
+		for {
+			manager.ConnToOper.Write(msg)
+			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+			_, err = manager.ConnToOper.Read(plug)
+			if err == nil {
+				break
+			}
+		}
+	}
+	msg, _ = proto.Marshal(&cmpb.Task{Type: typeReady})
+	for {
+		manager.ConnToOper.Write(msg)
+		manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+		_, err = manager.ConnToOper.Read(plug)
+		if err == nil {
+			break
+		}
+	}
+	return nil
 }
 
 func (manager *Manager) ConnectToOper(stopCtx context.Context) {
@@ -68,13 +160,23 @@ func (manager *Manager) ConnectToOper(stopCtx context.Context) {
 		}
 		buffer := make([]byte, 1024)
 		bytesRead, err := manager.Worker.ConnToOper.Read(buffer)
+		if err != nil {
+			fmt.Println("ConnectToOper: chansRecover written")
+			manager.chansRecover.response <- true
+			manager.chansRecover.send <- true
+		}
 		for err != nil {
+
 			if stopCtx.Err() == context.Canceled {
 				return
 			}
 			log.Println("Connection to operator lost")
-			time.Sleep(3 * time.Second)
-			//err = manager.tryConnect()
+			time.Sleep(2 * time.Second)
+			err = manager.tryConnect()
+			if err == nil {
+				manager.chansRecover.response <- true
+				manager.chansRecover.send <- true
+			}
 			//utils.HandleError(err, "Connection to opeator lost")
 		}
 		workerInfo := new(cmpb.OperToManager)
@@ -134,9 +236,14 @@ func (manager *Manager) findFreeWorker() (net.Conn, WorkerID) {
 	//var l int
 	// manager.Worker.mutex.Lock()
 	for len(manager.FreeWorkers) == 0 {
-		fmt.Println("findFreeWorker: empty free workers list")
-		// manager.Worker.
-		time.Sleep(500 * time.Millisecond)
+		select {
+		case <-manager.chansRecover.send:
+			<-manager.chansRecover.send
+		default:
+			fmt.Println("findFreeWorker: empty free workers list")
+			// manager.Worker.
+			time.Sleep(500 * time.Millisecond)
+		}
 	}
 	// num := rand.Intn(l)
 	// i := 0
@@ -180,45 +287,57 @@ func (manager *Manager) findFreeWorker() (net.Conn, WorkerID) {
 
 func (manager *Manager) SendTaskToWorker(stopCtx context.Context) {
 	for {
-		if manager.Tasks.Len() != 0 {
-			if stopCtx.Err() == context.Canceled {
-				return
-			}
-			manager.Worker.mutex.Lock()
-			taskFromList := manager.Tasks.Front()
-			if taskFromList != nil {
-				manager.Tasks.Remove(taskFromList)
-				manager.Worker.mutex.Unlock()
-				var task *cmpb.Task = taskFromList.Value.(*cmpb.Task)
-				// fmt.Println(task.Array)
-				msg, _ := proto.Marshal(task)
-				fmt.Println("SendTaskToWorker: before find ", task.Array)
-				conn, id := manager.findFreeWorker()
-				conn.Write(msg)
-				conn.Close()
-				fmt.Println("SendTaskToWorker: task sent ", task.Array)
-				manager.Worker.mutex.Lock()
-				manager.WorkersInfo[id].Task = task
-				manager.WorkersInfo[id].OperToManager.IsBusy = true
-				taskID, _ := uuid.Parse(task.ID)
-				manager.WorkersInfo[id].OperToManager.TaskID = task.ID
-				manager.BusyWorkers[TaskID(taskID)] = id //manager.WorkersInfo[id]
-				delete(manager.FreeWorkers, id)
-				msg, _ = proto.Marshal(&cmpb.OperToManager{Type: typeBusy, ID: uuid.UUID(id).String(), TaskID: taskID.String()})
-				// manager.ConnToOper.Write(msg)
-				for {
-					manager.ConnToOper.Write(msg) // response written
-					manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
-					plug := make([]byte, 1)
-					_, err := manager.ConnToOper.Read(plug)
-					if err == nil {
-						manager.ConnToOper.SetReadDeadline(time.Time{})
-						break
-					}
+		select {
+		case <-manager.chansRecover.send:
+			fmt.Println("SendTaskToWorker: recovering detected ")
+			<-manager.chansRecover.send
+		default:
+			if manager.Tasks.Len() != 0 {
+				if stopCtx.Err() == context.Canceled {
+					return
 				}
-				manager.Worker.mutex.Unlock()
-			} else {
-				manager.Worker.mutex.Unlock()
+				manager.Worker.mutex.Lock()
+				taskFromList := manager.Tasks.Front()
+				if taskFromList != nil {
+					manager.Tasks.Remove(taskFromList)
+					manager.Worker.mutex.Unlock()
+					var task *cmpb.Task = taskFromList.Value.(*cmpb.Task)
+					// fmt.Println(task.Array)
+					msg, _ := proto.Marshal(task)
+					fmt.Println("SendTaskToWorker: before find ", task.Array)
+					conn, id := manager.findFreeWorker()
+					conn.Write(msg)
+					conn.Close()
+					fmt.Println("SendTaskToWorker: task sent ", task.Array)
+					manager.Worker.mutex.Lock()
+					manager.WorkersInfo[id].Task = task
+					manager.WorkersInfo[id].OperToManager.IsBusy = true
+					taskID, _ := uuid.Parse(task.ID)
+					manager.WorkersInfo[id].OperToManager.TaskID = task.ID
+					manager.BusyWorkers[TaskID(taskID)] = id //manager.WorkersInfo[id]
+					delete(manager.FreeWorkers, id)
+					msg, _ = proto.Marshal(&cmpb.OperToManager{Type: typeBusy, ID: uuid.UUID(id).String(), TaskID: taskID.String()})
+					// manager.ConnToOper.Write(msg)
+				Loop:
+					for {
+						select {
+						case <-manager.chansRecover.send:
+							<-manager.chansRecover.send
+						default:
+							manager.ConnToOper.Write(msg) // response written
+							manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+							plug := make([]byte, 1)
+							_, err := manager.ConnToOper.Read(plug)
+							if err == nil {
+								manager.ConnToOper.SetReadDeadline(time.Time{})
+								break Loop
+							}
+						}
+					}
+					manager.Worker.mutex.Unlock()
+				} else {
+					manager.Worker.mutex.Unlock()
+				}
 			}
 		}
 	}
@@ -227,19 +346,6 @@ func (manager *Manager) SendTaskToWorker(stopCtx context.Context) {
 func (manager *Manager) GetResponses(stopCtx context.Context) {
 	var err error
 	fmt.Println("GetResponses: started")
-	// manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
-	// if err != nil {
-	// 	// handle error
-	// 	if stopCtx.Err() == context.Canceled {
-	// 		return
-	// 	}
-	// 	fmt.Println("GetResponses: ", err)
-	// 	if err.Error() == "listen tcp "+manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort+": bind: address already in use" {
-	// 		manager.Worker.managerListener.Close()
-	// 		manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
-	// 		fmt.Println("GetResponse: ", err)
-	// 	}
-	// }
 	if manager.Worker.Config.IsManager {
 		manager.Worker.managerListener, err = net.Listen("tcp", manager.Worker.ManagerHost+":"+manager.Worker.ManagerPort)
 		for err != nil {
@@ -280,39 +386,57 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 			continue
 		}
 		//defer conn.Close()
+		var bytesRead int
 		buffer := make([]byte, 1024)
-		bytesRead, err := conn.Read(buffer)
-		if err != nil {
-			if stopCtx.Err() == context.Canceled {
-				return
-			}
-			conn.Close()
-			fmt.Println("GetResponse: failed to read")
+		select {
+		case <-manager.chansRecover.response:
+			<-manager.chansRecover.response
 			continue
-			//utils.HandleError(err, "GetResponse: Failed to read response") // REDO
-			//handle error
+		default:
+			bytesRead, err = conn.Read(buffer)
+			if err != nil {
+				if stopCtx.Err() == context.Canceled {
+					return
+				}
+				conn.Close()
+				fmt.Println("GetResponse: failed to read")
+				continue
+				//utils.HandleError(err, "GetResponse: Failed to read response") // REDO
+				//handle error
 
-		}
-		plug := []byte("p")
-		conn.Write(plug)
-		conn.Close()
-		for {
-			manager.ConnToOper.Write(buffer[:bytesRead]) // response written
-			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
-			plug := make([]byte, 1)
-			_, err = manager.ConnToOper.Read(plug)
-			if err == nil {
-				manager.ConnToOper.SetReadDeadline(time.Time{})
-				break
 			}
+			plug := []byte("p")
+			conn.Write(plug)
 		}
-		fmt.Println("GetResponse: response written to operator")
+		conn.Close()
 		response := new(cmpb.Response)
 		proto.Unmarshal(buffer[:bytesRead], response)
 		uuID, _ := uuid.Parse(response.ID)
+		fmt.Println("GetResponse: ", response.ID)
+		wInfo, isIn := manager.BusyWorkers[TaskID(uuID)]
+		if !isIn {
+			continue
+		}
+	Loop:
+		for {
+			select {
+			case <-manager.chansRecover.response:
+				<-manager.chansRecover.response
+			default:
+				manager.ConnToOper.Write(buffer[:bytesRead]) // response written
+				manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+				plug := make([]byte, 1)
+				_, err = manager.ConnToOper.Read(plug)
+				if err == nil {
+					manager.ConnToOper.SetReadDeadline(time.Time{})
+					break Loop
+				}
+			}
+		}
+		fmt.Println("GetResponse: response written to operator")
+
 		manager.Worker.mutex.Lock()
 		fmt.Println("GetResponse: ", response.ID)
-		wInfo := manager.BusyWorkers[TaskID(uuID)]
 		var wID uuid.UUID = uuid.UUID(wInfo)
 		if err != nil {
 			fmt.Println("GetResponse:", err)
@@ -327,14 +451,20 @@ func (manager *Manager) GetResponses(stopCtx context.Context) {
 		delete(manager.BusyWorkers, TaskID(uuID))
 		msg, _ := proto.Marshal(&cmpb.OperToManager{Type: typeFree, ID: wID.String()}) //wInfo.OperToManager.ID}) //uuid.UUID(wID).String()})
 		//manager.ConnToOper.Write(msg)
+	Loop1:
 		for {
-			manager.ConnToOper.Write(msg) // response written
-			manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
-			plug := make([]byte, 1)
-			_, err = manager.ConnToOper.Read(plug)
-			if err == nil {
-				manager.ConnToOper.SetReadDeadline(time.Time{})
-				break
+			select {
+			case <-manager.chansRecover.response:
+				<-manager.chansRecover.response
+			default:
+				manager.ConnToOper.Write(msg) // response written
+				manager.ConnToOper.SetReadDeadline(time.Now().Add(time.Second))
+				plug := make([]byte, 1)
+				_, err = manager.ConnToOper.Read(plug)
+				if err == nil {
+					manager.ConnToOper.SetReadDeadline(time.Time{})
+					break Loop1
+				}
 			}
 		}
 		manager.Worker.mutex.Unlock()
@@ -349,6 +479,7 @@ func (worker *Worker) ExecManager(stopCtx context.Context) {
 		FreeWorkers:  make(map[WorkerID]struct{}),
 		BusyWorkers:  make(map[TaskID]WorkerID), //*WInfo),
 		Tasks:        list.New(),
+		chansRecover: Recover{response: make(chan bool), send: make(chan bool)},
 	}
 	var err error
 

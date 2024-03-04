@@ -9,6 +9,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 
 	pb "github.com/YanDanilin/ParallelProg/protobuf"
 	"github.com/YanDanilin/ParallelProg/utils"
@@ -66,19 +67,18 @@ func main() {
 		}
 		requestCount++
 		fmt.Println(requestCount, "-", array)
-		go func(req int32) {
-			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: array})
+		go func(req int32, arr []int32) {
+			response, err := client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: arr, Again: false})
 
-			if err != nil {
+			for err != nil {
 				log.Println("Connection to operator lost")
-				// log.Printf("Error: %v", err)
-
-				// fmt.Println("Try again?")
+				fmt.Println("Trying again task", arr)
+				time.Sleep(3 * time.Second)
 				// вынести подключение в отдельную функцию
-			} else {
-				fmt.Println("  ", req, "-", response)
+				response, err = client.ProcessRequest(context.Background(), &pb.RequestFromClient{Array: arr, Again: true})
 			}
-		}(requestCount)
+			fmt.Println("  ", req, "-", response)
+		}(requestCount, array)
 	}
 
 	fmt.Println("Client stopped working")

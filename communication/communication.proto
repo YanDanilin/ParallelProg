@@ -41,6 +41,7 @@ message OperToManager {
     string WorkerListenOn = 4;
     bool IsBusy = 5;
     string TaskID = 6;
+    string WorkerListenOperatorOn = 7;
 }
 
 message OperWorker {

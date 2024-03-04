@@ -177,7 +177,6 @@ func (worker *Worker) GettingTask(ctx context.Context, changeToManagerCtx contex
 			connToManager.SetReadDeadline(time.Now().Add(time.Second))
 			connToManager.Write(marshaledResponse)
 			buf := make([]byte, 10)
-			// connToManager.SetReadDeadline(time.Now().Add(time.Second))
 			_, err = connToManager.Read(buf)
 			if err == nil {
 				break
